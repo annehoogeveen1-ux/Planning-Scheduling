@@ -6,40 +6,39 @@ def generate_distance_matrix_organizations(file_path, separator=';'):
     """
     Leest een zorgorganisatie CSV in en genereert een afstandmatrix in kilometers.
     """
-    # 1. Lees het CSV-bestand in
+    # 1. # 1. Read existing organization data
     df = pd.read_csv(file_path, sep=separator)
     df.columns = df.columns.str.strip()
     
     lon_col = 'Longditude' if 'Longditude' in df.columns else 'Longitude'
     
-    # 2. Haal de Wetenschappelijke Graden (lat/lon) op en zet ze om naar radialen
+    # 2. convert degrees -> radial
     lat_rad = np.radians(df['Latitude'].values)
     lon_rad = np.radians(df[lon_col].values)
     
-    # 3. Bereken het verschil tussen alle paren (Matrix Broadcasting)
-    # Dit maakt handig gebruik van dimensies om alle combinaties in één keer te doen
+    # 3. Calc difference between pairs
     dlat = lat_rad[:, np.newaxis] - lat_rad
     dlon = lon_rad[:, np.newaxis] - lon_rad
     
-    # 4. De Haversine formule
+    # 4. the Haversine formula
     a = np.sin(dlat / 2.0)**2 + np.cos(lat_rad[:, np.newaxis]) * np.cos(lat_rad) * np.sin(dlon / 2.0)**2
     c = 2 * np.arcsin(np.sqrt(a))
     
-    km_matrix = 6371 * c               #Straal van de aarde in kilometers is 6371
-    km_matrix = np.round(km_matrix, 2) #Afronden op 2 decimalen voor de netheid
+    km_matrix = 6371 * c               #radius of the earth = 6371
+    km_matrix = np.round(km_matrix, 2) #round on 2 decimals
     
-    # 6. Formatteer naar een overzichtelijke DataFrame
+    # 6. make dataframe
     matrix_df = pd.DataFrame(km_matrix, index=df['Organization'], columns=df['Organization'])
     
     return matrix_df
 
 def find_closest_organizations(file_path, num_patients=1, separator=';'):
-    # 1. Read your existing organization data
+    # 1. Read existing organization data
     df = pd.read_csv(file_path, sep=separator)
     df.columns = df.columns.str.strip()
     lon_col = 'Longditude' if 'Longditude' in df.columns else 'Longitude'
     
-    # 2. Get bounding box of your organizations to keep random patients in the same region
+    # 2. Get bounding box of organizations to keep random patients in the same region
     min_lat, max_lat = df['Latitude'].min(), df['Latitude'].max()
     min_lon, max_lon = df[lon_col].min(), df[lon_col].max()
     
@@ -85,12 +84,10 @@ def find_closest_organizations(file_path, num_patients=1, separator=';'):
 
 file_path = "Generated Data.csv"
 
-# 2. Generate and display the organization distance matrix
 print("=== ORGANIZATION DISTANCE MATRIX (KM) ===")
 org_matrix = generate_distance_matrix_organizations(file_path)
 print(org_matrix)
 print("\n" + "="*50 + "\n")
 
-# 3. Generate 10 random patients and find their 2 closest organizations
 print("=== NEAREST ORGANIZATIONS FOR 10 RANDOM PATIENTS ===")
 find_closest_organizations(file_path, num_patients=10)
