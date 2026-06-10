@@ -33,7 +33,6 @@ def generate_patient_location():
         "longitude": destination.longitude
     }
 
-
 # -----------------------------
 # Patient generator
 # -----------------------------
@@ -78,7 +77,6 @@ print("Starting patient generation...\n")
 for i in range(100):
     patient_data = generate_patient()
     patients_list.append(patient_data)
-
     print(f"Generated patient {i+1}/100")
 
 # -----------------------------
@@ -86,5 +84,4 @@ for i in range(100):
 # -----------------------------
 df = pd.DataFrame(patients_list)
 df.to_csv("patients.csv", index=False)
-
 print("\nSuccess! Generated 100 patients and saved to patients.csv")
