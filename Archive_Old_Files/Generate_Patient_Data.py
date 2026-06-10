@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
 from tqdm import tqdm
-from Random_Address import generate_random_address
+from Archive_Old_Files.Random_Address import generate_random_address
 
 
 def generate_patient_data(n_patients=1000, lambda_per_hour=15, start_time=None):
