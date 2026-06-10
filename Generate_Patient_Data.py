@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
+from tqdm import tqdm
 from Random_Address import generate_random_address
 
 
@@ -43,7 +44,7 @@ def generate_patient_data(n_patients=1000, lambda_per_hour=15, start_time=None):
     # Generate patient data
     patients = []
     
-    for patient_id in range(1, n_patients + 1):
+    for patient_id in tqdm(range(1, n_patients + 1), desc="Generating patients", total=n_patients):
         # Generate address using the shared function
         address_data = generate_random_address(max_attempts=10)
         
