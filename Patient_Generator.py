@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import random
 from geopy.distance import geodesic
+from Algorithm import location_centre
 
 # -----------------------------
 # Load distributions
@@ -18,21 +19,26 @@ dist_visit_frequency['CDF Bucket'] = dist_visit_frequency['CDF Bucket'] / dist_v
 # -----------------------------
 # Location generator (50 km radius)
 # -----------------------------
-def generate_patient_location():
-    centre_lat = 52.5136992436934
-    centre_lon = 6.123670119684271
-    radius_km = 50
+import random
+from geopy.distance import geodesic
+from Algorithm import location_centre
 
+def generate_patient_location():
+    radius_km = 50
     distance = random.uniform(0, radius_km)
     bearing = random.uniform(0, 360)
 
-    destination = geodesic(kilometers=distance).destination((centre_lat, centre_lon),bearing)
+    centre_lat = location_centre["centre_lat"]
+    centre_lon = location_centre["centre_lon"]
 
+    destination = geodesic(kilometers=distance).destination(
+        (centre_lat, centre_lon),
+        bearing
+    )
     return {
         "latitude": destination.latitude,
         "longitude": destination.longitude
     }
-
 # -----------------------------
 # Patient generator
 # -----------------------------
@@ -71,17 +77,21 @@ def generate_patient():
 # -----------------------------
 # Generate dataset
 # -----------------------------
-patients_list = []
-print("Starting patient generation...\n")
+def trial_generate_data_set():
+    patients_list = []
+    print("Starting patient generation...\n")
 
-for i in range(100):
-    patient_data = generate_patient()
-    patients_list.append(patient_data)
-    print(f"Generated patient {i+1}/100")
+    for i in range(100):
+        patient_data = generate_patient()
+        patients_list.append(patient_data)
+        print(f"Generated patient {i+1}/100")
 
-# -----------------------------
-# Save to CSV
-# -----------------------------
-df = pd.DataFrame(patients_list)
-df.to_csv("patients.csv", index=False)
-print("\nSuccess! Generated 100 patients and saved to patients.csv")
+    # -----------------------------
+    # Save to CSV
+    # -----------------------------
+    df = pd.DataFrame(patients_list)
+    df.to_csv("patients.csv", index=False)
+    print("\nSuccess! Generated 100 patients and saved to patients.csv")
+
+
+trial_generate_data_set()
