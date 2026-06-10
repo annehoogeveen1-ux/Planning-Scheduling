@@ -3,7 +3,7 @@ import pandas as pd
 import random
 from geopy.distance import geodesic
 
-from config import location_centre
+from Config import location_centre
 
 # -----------------------------
 # Load distributions

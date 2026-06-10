@@ -1,12 +1,11 @@
 from geopy.distance import geodesic
 from Patient_Generator import generate_patient
-from config import home_centres
+from Config import home_centres
 
 # -----------------------------
 # Allocation function
 # -----------------------------
 def allocate_patient():
-
     patient = generate_patient()
 
     best_centre = None
