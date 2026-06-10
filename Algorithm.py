@@ -1,12 +1,10 @@
+from geopy.distance import geodesic
 from Patient_Generator import generate_patient
-from Config import home_centres
+from config import home_centres
 
-home_centres = [
-    {"id": 1, "lat": 52.27818005978114, "lon": 5.972706090677909},
-    {"id": 2, "lat": 52.52965432815976, "lon": 5.917148356828077},
-    {"id": 3, "lat": 52.171816247239505, "lon": 5.744777726409898}
-]
-
+# -----------------------------
+# Allocation function
+# -----------------------------
 def allocate_patient():
 
     patient = generate_patient()
@@ -14,18 +12,36 @@ def allocate_patient():
     best_centre = None
     best_distance = float("inf")
 
-    for c in home_centres:
+    for centre in home_centres:
         dist = geodesic(
             (patient["latitude"], patient["longitude"]),
-            (c["lat"], c["lon"])
+            (centre["lat"], centre["lon"])
         ).km
 
         if dist < best_distance:
             best_distance = dist
-            best_centre = c
+            best_centre = centre
 
     return {
         **patient,
         "assigned_centre": best_centre["id"],
         "distance_km": best_distance
     }
+
+# -----------------------------
+# Batch simulation (optional)
+# -----------------------------
+def run_simulation(n=100):
+    results = []
+
+    for _ in range(n):
+        results.append(allocate_patient())
+
+    return results
+
+
+# -----------------------------
+# Test run
+# -----------------------------
+if __name__ == "__main__":
+    print(allocate_patient())

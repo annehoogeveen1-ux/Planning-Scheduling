@@ -1,20 +1,28 @@
-from Config import location_centre
+import numpy as np
+import pandas as pd
+import random
+from geopy.distance import geodesic
 
-patient_counter = 0
+from config import location_centre
 
 # -----------------------------
-# distributions (keep yours)
+# Load distributions
 # -----------------------------
 dist_nurse_skill = pd.read_csv('P_Nurse_Skills.csv', sep=';', decimal=',')
 dist_type_care = pd.read_csv('P_Type_Care.csv', sep=';', decimal=',', float_precision='round_trip')
 dist_visit_frequency = pd.read_csv('P_Visit_Frequency.csv', sep=';', decimal=',')
 
-dist_nurse_skill['Dist'] /= dist_nurse_skill['Dist'].sum()
-dist_type_care['Distribution'] /= dist_type_care['Distribution'].sum()
-dist_visit_frequency['CDF Bucket'] /= dist_visit_frequency['CDF Bucket'].sum()
+dist_nurse_skill['Dist'] = dist_nurse_skill['Dist'] / dist_nurse_skill['Dist'].sum()
+dist_type_care['Distribution'] = dist_type_care['Distribution'] / dist_type_care['Distribution'].sum()
+dist_visit_frequency['CDF Bucket'] = dist_visit_frequency['CDF Bucket'] / dist_visit_frequency['CDF Bucket'].sum()
 
 # -----------------------------
-# location generator
+# Counter
+# -----------------------------
+patient_counter = 0
+
+# -----------------------------
+# Location generator
 # -----------------------------
 def generate_patient_location():
     radius_km = 50
@@ -32,7 +40,7 @@ def generate_patient_location():
     }
 
 # -----------------------------
-# patient generator
+# Patient generator
 # -----------------------------
 def generate_patient():
     global patient_counter
@@ -56,10 +64,21 @@ def generate_patient():
     location = generate_patient_location()
 
     return {
-        'patient_id': patient_counter,
-        'nurse_skill': nurse_skill,
-        'type_care': type_care,
-        'visit_frequency': visit_frequency,
-        'latitude': location['latitude'],
-        'longitude': location['longitude']
+        "patient_id": patient_counter,
+        "nurse_skill": nurse_skill,
+        "type_care": type_care,
+        "visit_frequency": visit_frequency,
+        "latitude": location["latitude"],
+        "longitude": location["longitude"]
     }
+
+# -----------------------------
+# Optional batch generator
+# -----------------------------
+def generate_dataset(n=100):
+    patients = []
+
+    for _ in range(n):
+        patients.append(generate_patient())
+
+    return pd.DataFrame(patients)
