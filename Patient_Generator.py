@@ -2,48 +2,42 @@ import pandas as pd
 import numpy as np
 import random
 from geopy.distance import geodesic
-from Algorithm import location_centre
+from config import location_centre
+
+patient_counter = 0
 
 # -----------------------------
-# Load distributions
+# distributions (keep yours)
 # -----------------------------
 dist_nurse_skill = pd.read_csv('P_Nurse_Skills.csv', sep=';', decimal=',')
 dist_type_care = pd.read_csv('P_Type_Care.csv', sep=';', decimal=',', float_precision='round_trip')
 dist_visit_frequency = pd.read_csv('P_Visit_Frequency.csv', sep=';', decimal=',')
 
-dist_nurse_skill['Dist'] = dist_nurse_skill['Dist'] / dist_nurse_skill['Dist'].sum()
-dist_type_care['Distribution'] = dist_type_care['Distribution'] / dist_type_care['Distribution'].sum()
-dist_visit_frequency['CDF Bucket'] = dist_visit_frequency['CDF Bucket'] / dist_visit_frequency['CDF Bucket'].sum()
-
+dist_nurse_skill['Dist'] /= dist_nurse_skill['Dist'].sum()
+dist_type_care['Distribution'] /= dist_type_care['Distribution'].sum()
+dist_visit_frequency['CDF Bucket'] /= dist_visit_frequency['CDF Bucket'].sum()
 
 # -----------------------------
-# Location generator (50 km radius)
+# location generator
 # -----------------------------
-import random
-from geopy.distance import geodesic
-from Algorithm import location_centre
-
 def generate_patient_location():
     radius_km = 50
     distance = random.uniform(0, radius_km)
     bearing = random.uniform(0, 360)
 
-    centre_lat = location_centre["centre_lat"]
-    centre_lon = location_centre["centre_lon"]
-
     destination = geodesic(kilometers=distance).destination(
-        (centre_lat, centre_lon),
+        (location_centre["centre_lat"], location_centre["centre_lon"]),
         bearing
     )
+
     return {
         "latitude": destination.latitude,
         "longitude": destination.longitude
     }
-# -----------------------------
-# Patient generator
-# -----------------------------
-patient_counter = 0
 
+# -----------------------------
+# patient generator
+# -----------------------------
 def generate_patient():
     global patient_counter
     patient_counter += 1
@@ -63,7 +57,6 @@ def generate_patient():
         p=dist_visit_frequency['CDF Bucket']
     ))
 
-    # ✔ USE YOUR OWN LOCATION FUNCTION
     location = generate_patient_location()
 
     return {
@@ -74,24 +67,3 @@ def generate_patient():
         'latitude': location['latitude'],
         'longitude': location['longitude']
     }
-# -----------------------------
-# Generate dataset
-# -----------------------------
-def trial_generate_data_set():
-    patients_list = []
-    print("Starting patient generation...\n")
-
-    for i in range(100):
-        patient_data = generate_patient()
-        patients_list.append(patient_data)
-        print(f"Generated patient {i+1}/100")
-
-    # -----------------------------
-    # Save to CSV
-    # -----------------------------
-    df = pd.DataFrame(patients_list)
-    df.to_csv("patients.csv", index=False)
-    print("\nSuccess! Generated 100 patients and saved to patients.csv")
-
-
-trial_generate_data_set()
