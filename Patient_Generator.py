@@ -1,8 +1,4 @@
-import pandas as pd
-import numpy as np
-import random
-from geopy.distance import geodesic
-from config import location_centre
+from Config import location_centre
 
 patient_counter = 0
 

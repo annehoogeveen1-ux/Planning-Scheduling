@@ -1,5 +1,5 @@
-from geopy.distance import geodesic
 from Patient_Generator import generate_patient
+from Config import home_centres
 
 home_centres = [
     {"id": 1, "lat": 52.27818005978114, "lon": 5.972706090677909},
