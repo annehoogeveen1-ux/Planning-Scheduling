@@ -51,7 +51,10 @@ def generate_patient():
         'longitude': longitude
     }
 
-
-print(generate_patient())
-
-
+patients = []
+for _ in range(100):
+    patients.append(generate_patient())
+df = pd.DataFrame(patients)
+df.to_csv("patients.csv", index=False)
+print("Generated 100 patients and saved to patients.csv")
+print(df.to_string(index=False))
