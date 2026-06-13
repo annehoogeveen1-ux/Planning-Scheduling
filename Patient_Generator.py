@@ -24,7 +24,7 @@ import random
 from datetime import date, timedelta
 from geopy.distance import geodesic
 
-from Archive_Old_Files.Config import location_centre
+from Config import location_centre
 
 
 # =============================================================================
