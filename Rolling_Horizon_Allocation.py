@@ -20,7 +20,6 @@ OUTER LOOP — Rolling Horizon
 
   initialiseer remaining_capacity[o][w] voor alle providers en weken
   initialiseer assignment_map = {}
-  initialiseer unassignable = []
 
   FOR each planning_moment t in planning_moments:
 
@@ -68,46 +67,46 @@ OUTER LOOP — Rolling Horizon
 
           FOR each provider o:
 
-              // Check feasibility: genoeg capaciteit in alle actieve weken?
-              feasible = TRUE
-              FOR each week w in p.active_weeks:
-                  needed = p.visit_hours + travel_hrs[p][o]
-                  IF remaining_capacity[o][w] < needed:
-                      feasible = FALSE; BREAK
-
-              IF NOT feasible: SKIP
-
-              // Scorefunctie: combineer bezetting en reisafstand
+              // Bezettingsgraad: hoe vol is de provider al? (mag > 1 worden)
               load     = MAX over active_weeks of
                          (1 - remaining_capacity[o][w]
                               / o.capacity_hrs_per_week)
               distance = travel_hrs[p][o]
-              score    = α * load + (1 - α) * distance
+
+              // OVERCAPACITY PENALTY (zachte grens, geen afwijzing)
+              // Als toewijzing capaciteit zou overschrijden, voeg
+              // zware straf toe i.p.v. provider uit te sluiten.
+              overcap_penalty = 0
+              FOR each week w in p.active_weeks:
+                  needed  = p.visit_hours + travel_hrs[p][o]
+                  deficit = needed - remaining_capacity[o][w]
+                  IF deficit > 0:
+                      overcap_penalty = MAX(overcap_penalty,
+                                             PENALTY_WEIGHT * deficit)
+
+              score = α * load + (1 - α) * distance + overcap_penalty
 
               IF score < best_score:
                   best_score    = score
                   best_provider = o
 
-          // Wijs toe of markeer als niet plaatsbaar
-          IF best_provider != NULL:
-              FOR each week w in p.active_weeks:
-                  remaining_capacity[best_provider][w] -=
-                      (p.visit_hours + travel_hrs[p][best_provider])
-              assignment_map[p] = best_provider
-          ELSE:
-              unassignable.append(p)
+          // Patiënt wordt ALTIJD toegewezen (geen afwijzing mogelijk)
+          FOR each week w in p.active_weeks:
+              remaining_capacity[best_provider][w] -=
+                  (p.visit_hours + travel_hrs[p][best_provider])
+              // Let op: kan negatief worden = overschrijding capaciteit
+          assignment_map[p] = best_provider
 
   ────────────────────────────────────────────────────
   STEP 6 — Output & KPIs
   ────────────────────────────────────────────────────
   RETURN assignment_map
-  RETURN remaining_capacity
-  RETURN unassignable
+  RETURN remaining_capacity   // negatieve waarden = overschrijding
 
   KPIs:
-    - Bezettingsgraad per organisatie per week (%)
+    - Bezettingsgraad per organisatie per week (%, kan > 100%)
     - Gemiddelde reisafstand per toewijzing (km)
-    - Aantal niet-geplaatste patiënten
+    - Aantal weken met overschrijding per organisatie
     - Standaarddeviatie in belasting tussen organisaties
 
 =============================================================================
@@ -116,10 +115,22 @@ PYTHON IMPLEMENTATIE
 """
 
 import math
+import pandas as pd
 from datetime import date, timedelta
 from dataclasses import dataclass, field
 from collections import defaultdict
 from typing import Optional
+
+
+# =============================================================================
+# CONSTANTEN
+# =============================================================================
+
+# Gewicht voor de overcapaciteit-penalty in de scorefunctie.
+# Hoog genoeg gekozen zodat een toewijzing zonder overschrijding
+# ALTIJD de voorkeur krijgt boven een toewijzing met overschrijding,
+# ongeacht load/afstand verschillen (die liggen in range [0,1]).
+OVERCAPACITY_PENALTY_WEIGHT = 10.0
 
 
 # =============================================================================
@@ -145,6 +156,83 @@ class Provider:
     provider_id: str
     coords: tuple                # (latitude, longitude)
     capacity_hrs_per_week: float
+
+
+# =============================================================================
+# CSV INLEZEN
+# =============================================================================
+
+def load_providers_from_csv(filepath: str) -> list:
+    """
+    Laadt thuiszorgorganisaties in vanuit een CSV-bestand.
+
+    Verwacht formaat (kolomkoppen exact zo benoemd):
+
+        provider_id,latitude,longitude,capacity_hrs_per_week
+        ThuiszorgA,52.21,6.89,80.0
+        ThuiszorgB,52.24,6.93,80.0
+        ThuiszorgC,52.19,6.86,75.0
+
+    Returns:
+    --------
+    list van Provider objecten
+    """
+    df = pd.read_csv(filepath, dtype={'provider_id': str})
+
+    required_cols = {'provider_id', 'latitude', 'longitude',
+                      'capacity_hrs_per_week'}
+    missing = required_cols - set(df.columns)
+    if missing:
+        raise ValueError(f"CSV mist verplichte kolommen: {missing}")
+
+    providers = []
+    for _, row in df.iterrows():
+        providers.append(Provider(
+            provider_id=row['provider_id'],
+            coords=(float(row['latitude']), float(row['longitude'])),
+            capacity_hrs_per_week=float(row['capacity_hrs_per_week'])
+        ))
+
+    return providers
+
+
+def load_patients_from_csv(filepath: str) -> list:
+    """
+    Laadt patiënten in vanuit een CSV-bestand.
+
+    Verwacht formaat (kolomkoppen exact zo benoemd, eventuele extra
+    kolommen zoals nurse_skill/type_care worden genegeerd):
+
+        patient_id,discharge_date,length_of_stay,visit_hours,latitude,longitude
+        P0001,2024-01-03,28,4,52.30,5.76
+        P0002,2024-01-05,21,3,52.78,6.52
+
+    discharge_date moet leesbaar zijn als datum (bijv. YYYY-MM-DD).
+
+    Returns:
+    --------
+    list van Patient objecten
+    """
+    df = pd.read_csv(filepath, dtype={'patient_id': str},
+                     parse_dates=['discharge_date'])
+
+    required_cols = {'patient_id', 'discharge_date', 'length_of_stay',
+                      'visit_hours', 'latitude', 'longitude'}
+    missing = required_cols - set(df.columns)
+    if missing:
+        raise ValueError(f"CSV mist verplichte kolommen: {missing}")
+
+    patients = []
+    for _, row in df.iterrows():
+        patients.append(Patient(
+            patient_id=row['patient_id'],
+            discharge_date=row['discharge_date'].date(),
+            length_of_stay=int(row['length_of_stay']),
+            visit_hours=float(row['visit_hours']),
+            home_coords=(float(row['latitude']), float(row['longitude']))
+        ))
+
+    return patients
 
 
 # =============================================================================
@@ -235,7 +323,6 @@ def rolling_horizon_assignment(
     --------
     dict met:
       'assignments'        : {patient_id: provider_id}
-      'unassignable'       : [patient_ids]
       'remaining_capacity' : {provider_id: {week: resterende_uren}}
       'kpis'               : dict met evaluatiemetrieken
     """
@@ -258,7 +345,6 @@ def rolling_horizon_assignment(
 
     # Resultaten
     assignment_map  = {}   # patient_id → provider_id
-    unassignable    = []   # patient_ids die niet geplaatst konden worden
     travel_log      = {}   # patient_id → reisuren naar toegewezen provider
 
     # Bijhoud welke patiënten al verwerkt zijn
@@ -330,25 +416,12 @@ def rolling_horizon_assignment(
 
             for o in providers:
 
-                # Check feasibility: genoeg capaciteit in alle actieve weken?
-                feasible = True
-                for w in patient_active_weeks[p.patient_id]:
-                    needed = p.visit_hours + travel_hrs[p.patient_id][o.provider_id]
-                    if w not in remaining_capacity[o.provider_id]:
-                        feasible = False
-                        break
-                    if remaining_capacity[o.provider_id][w] < needed:
-                        feasible = False
-                        break
-
-                if not feasible:
-                    continue
-
                 # Bereken score
                 active_w = patient_active_weeks[p.patient_id]
 
                 if active_w:
                     # Bezettingsgraad: hoe vol is de provider al?
+                    # Kan > 1 worden bij overschrijding (zachte grens)
                     load = max(
                         1 - remaining_capacity[o.provider_id][w]
                             / o.capacity_hrs_per_week
@@ -363,28 +436,46 @@ def rolling_horizon_assignment(
                 # Normaliseer afstand (max ~2 uur reistijd als referentie)
                 distance_normalized = min(distance / 2.0, 1.0)
 
-                score = alpha * load + (1 - alpha) * distance_normalized
+                # OVERCAPACITY PENALTY
+                # Als deze toewijzing de capaciteit zou overschrijden,
+                # voegen we een zware extra straf toe zodat het algoritme
+                # overschrijding alleen kiest als er geen alternatief is.
+                overcapacity_penalty = 0.0
+                for w in active_w:
+                    if w in remaining_capacity[o.provider_id]:
+                        needed = (p.visit_hours +
+                                  travel_hrs[p.patient_id][o.provider_id])
+                        deficit = needed - remaining_capacity[o.provider_id][w]
+                        if deficit > 0:
+                            # Straf proportioneel aan het tekort,
+                            # met grote constante om altijd te domineren
+                            # boven load/afstand verschillen
+                            overcapacity_penalty = max(
+                                overcapacity_penalty,
+                                OVERCAPACITY_PENALTY_WEIGHT * deficit
+                            )
+
+                score = (alpha * load
+                         + (1 - alpha) * distance_normalized
+                         + overcapacity_penalty)
 
                 if score < best_score:
                     best_score    = score
                     best_provider = o
 
-            # Wijs toe of markeer als niet plaatsbaar
-            if best_provider is not None:
-                # Boek capaciteit
-                for w in patient_active_weeks[p.patient_id]:
-                    if w in remaining_capacity[best_provider.provider_id]:
-                        remaining_capacity[best_provider.provider_id][w] -= (
-                            p.visit_hours +
-                            travel_hrs[p.patient_id][best_provider.provider_id]
-                        )
+            # Wijs altijd toe (patiënt kan nooit afgewezen worden)
+            # Boek capaciteit; remaining_capacity mag negatief worden
+            for w in patient_active_weeks[p.patient_id]:
+                if w in remaining_capacity[best_provider.provider_id]:
+                    remaining_capacity[best_provider.provider_id][w] -= (
+                        p.visit_hours +
+                        travel_hrs[p.patient_id][best_provider.provider_id]
+                    )
 
-                assignment_map[p.patient_id] = best_provider.provider_id
-                travel_log[p.patient_id] = (
-                    travel_hrs[p.patient_id][best_provider.provider_id]
-                )
-            else:
-                unassignable.append(p.patient_id)
+            assignment_map[p.patient_id] = best_provider.provider_id
+            travel_log[p.patient_id] = (
+                travel_hrs[p.patient_id][best_provider.provider_id]
+            )
 
             processed.add(p.patient_id)
 
@@ -392,13 +483,12 @@ def rolling_horizon_assignment(
     # STEP 6: Bereken KPIs
     # -------------------------------------------------------------------------
     kpis = compute_kpis(
-        assignment_map, unassignable, remaining_capacity,
+        assignment_map, remaining_capacity,
         providers, all_weeks, travel_log, patients
     )
 
     return {
         'assignments':        assignment_map,
-        'unassignable':       unassignable,
         'remaining_capacity': remaining_capacity,
         'kpis':               kpis
     }
@@ -408,7 +498,7 @@ def rolling_horizon_assignment(
 # KPI BEREKENING
 # =============================================================================
 
-def compute_kpis(assignment_map, unassignable, remaining_capacity,
+def compute_kpis(assignment_map, remaining_capacity,
                  providers, all_weeks, travel_log, patients) -> dict:
     """
     Berekent evaluatiemetrieken over de volledige planning.
@@ -449,12 +539,19 @@ def compute_kpis(assignment_map, unassignable, remaining_capacity,
                   / len(util_values)), 2
     ) if util_values else 0.0
 
+    # Aantal weken met overschrijding (>100% bezetting) per provider
+    overcapacity_weeks = {}
+    for o in providers:
+        overcapacity_weeks[o.provider_id] = sum(
+            1 for v in utilization[o.provider_id].values() if v > 100
+        )
+
     return {
         'total_assigned':        len(assignment_map),
-        'total_unassignable':    len(unassignable),
         'avg_travel_hrs':        avg_travel,
         'avg_utilization_%':     avg_utilization,
         'utilization_std_dev_%': std_util,
+        'overcapacity_weeks':    overcapacity_weeks,
         'utilization_per_week':  utilization
     }
 
@@ -488,19 +585,19 @@ def print_results(result: dict, patients: list, providers: list):
                   f"{p.visit_hours} uur/week | "
                   f"{p.length_of_stay} dagen zorg")
 
-    # Niet plaatsbare patiënten
-    if result['unassignable']:
-        print(f"\n⚠️  NIET PLAATSBAAR ({len(result['unassignable'])}):")
-        for pid in result['unassignable']:
-            p = patient_map[pid]
-            print(f"    - {pid} | {p.visit_hours} uur/week | "
-                  f"{p.length_of_stay} dagen")
-
     # KPIs
     kpis = result['kpis']
+
+    # Waarschuwing bij overschrijding van capaciteit
+    overcap = kpis['overcapacity_weeks']
+    if any(v > 0 for v in overcap.values()):
+        print(f"\n⚠️  CAPACITEITSOVERSCHRIJDING (weken > 100%):")
+        for oid, weeks in overcap.items():
+            if weeks > 0:
+                print(f"    - {oid}: {weeks} week(en)")
+
     print("\n📊 KPIs:")
     print(f"  Totaal toegewezen       : {kpis['total_assigned']}")
-    print(f"  Totaal niet plaatsbaar  : {kpis['total_unassignable']}")
     print(f"  Gem. reistijd           : {kpis['avg_travel_hrs']} uur")
     print(f"  Spreiding bezetting     : {kpis['utilization_std_dev_%']}%")
 
@@ -518,26 +615,9 @@ def print_results(result: dict, patients: list, providers: list):
 
 if __name__ == "__main__":
 
-    # Voorbeelddata: patiënten
-    patients = [
-        Patient("P001", date(2024, 1,  8), 28, 10.0, (52.22, 6.90)),
-        Patient("P002", date(2024, 1,  8), 14,  6.0, (52.20, 6.85)),
-        Patient("P003", date(2024, 1, 10), 21, 14.0, (52.25, 6.95)),
-        Patient("P004", date(2024, 1, 10), 35,  8.0, (52.18, 6.88)),
-        Patient("P005", date(2024, 1, 12), 14, 12.0, (52.23, 6.92)),
-        Patient("P006", date(2024, 1, 15), 28,  5.0, (52.19, 6.87)),
-        Patient("P007", date(2024, 1, 15), 21,  9.0, (52.26, 6.93)),
-        Patient("P008", date(2024, 1, 18), 14, 11.0, (52.21, 6.89)),
-        Patient("P009", date(2024, 1, 20), 28,  7.0, (52.24, 6.91)),
-        Patient("P010", date(2024, 1, 22), 21, 13.0, (52.17, 6.86)),
-    ]
-
-    # Voorbeelddata: thuiszorgorganisaties (in Enschede omgeving)
-    providers = [
-        Provider("ThuiszorgA", (52.21, 6.89), capacity_hrs_per_week=80.0),
-        Provider("ThuiszorgB", (52.24, 6.93), capacity_hrs_per_week=80.0),
-        Provider("ThuiszorgC", (52.19, 6.86), capacity_hrs_per_week=80.0),
-    ]
+    # Patiënten en thuiszorgorganisaties inladen vanuit CSV
+    patients  = load_patients_from_csv("patients.csv")
+    providers = load_providers_from_csv("providers.csv")
 
     # Draai het algoritme
     # alpha=0.6: lichte voorkeur voor gelijke spreiding boven minimale reistijd

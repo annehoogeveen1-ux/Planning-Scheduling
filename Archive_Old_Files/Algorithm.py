@@ -1,6 +1,6 @@
 from geopy.distance import geodesic
 from Patient_Generator import generate_patient
-from Config import home_centres
+from Archive_Old_Files.Config import home_centres
 
 # -----------------------------
 # Allocation function
