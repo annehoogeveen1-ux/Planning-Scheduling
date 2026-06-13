@@ -156,6 +156,7 @@ class Provider:
     provider_id: str
     coords: tuple                # (latitude, longitude)
     capacity_hrs_per_week: float
+    initial_load_hrs_per_week: float = 0.0  # reeds toegewezen uren (lopende caseload)
 
 
 # =============================================================================
@@ -168,10 +169,13 @@ def load_providers_from_csv(filepath: str) -> list:
 
     Verwacht formaat (kolomkoppen exact zo benoemd):
 
-        provider_id,latitude,longitude,capacity_hrs_per_week
-        ThuiszorgA,52.21,6.89,80.0
-        ThuiszorgB,52.24,6.93,80.0
-        ThuiszorgC,52.19,6.86,75.0
+        provider_id,latitude,longitude,capacity_hrs_per_week,initial_load_hrs_per_week
+        ThuiszorgA,52.21,6.89,80.0,55.0
+        ThuiszorgB,52.24,6.93,80.0,40.0
+        ThuiszorgC,52.19,6.86,75.0,60.0
+
+    'initial_load_hrs_per_week' is optioneel — ontbreekt deze kolom,
+    dan wordt 0.0 aangenomen (lege start).
 
     Returns:
     --------
@@ -185,12 +189,16 @@ def load_providers_from_csv(filepath: str) -> list:
     if missing:
         raise ValueError(f"CSV mist verplichte kolommen: {missing}")
 
+    has_initial_load = 'initial_load_hrs_per_week' in df.columns
+
     providers = []
     for _, row in df.iterrows():
         providers.append(Provider(
             provider_id=row['provider_id'],
             coords=(float(row['latitude']), float(row['longitude'])),
-            capacity_hrs_per_week=float(row['capacity_hrs_per_week'])
+            capacity_hrs_per_week=float(row['capacity_hrs_per_week']),
+            initial_load_hrs_per_week=float(row['initial_load_hrs_per_week'])
+                if has_initial_load else 0.0
         ))
 
     return providers
@@ -339,7 +347,10 @@ def rolling_horizon_assignment(
 
     # Capaciteitsboekhouding: remaining_capacity[provider_id][week] = uren
     remaining_capacity = {
-        o.provider_id: {w: o.capacity_hrs_per_week for w in all_weeks}
+        o.provider_id: {
+            w: o.capacity_hrs_per_week - o.initial_load_hrs_per_week
+            for w in all_weeks
+        }
         for o in providers
     }
 
