@@ -462,6 +462,58 @@ def method_round_robin(patients, providers, patient_active_weeks,
                        travel_hrs, remaining_capacity,
                        assignment_map, travel_log, processed)
 
+def method_edd(patients, providers, patient_active_weeks,
+               travel_hrs, remaining_capacity,
+               assignment_map, travel_log, processed, alpha=0.5, **kwargs):
+    """
+    METHODE 1 — Earliest Due Date (EDD).
+
+    Sorteert patiënten strikt op de vroegste ontslagdatum (discharge_date).
+    Patiënten die NU zorg nodig hebben, krijgen als eerste een provider toegewezen.
+    Binnen de toewijzing wordt gebalanceerd tussen load en afstand via alpha.
+
+    Sterk in: minimaliseren van deadline-overschrijdingen / logische tijdslijn.
+    Zwak in: houdt bij de patiëntvolgorde geen rekening met urgentie of reistijd.
+    """
+    # De essentie van EDD: Sorteer patiënten van vroeg naar laat op basis van ontslagdatum
+    patients_sorted = sorted(patients, key=lambda p: p.discharge_date)
+
+    for p in patients_sorted:
+        if p.patient_id in processed:
+            continue
+
+        best_provider = None
+        best_score    = float('inf')
+
+        for o in providers:
+            active_w = patient_active_weeks[p.patient_id]
+            
+            # Bereken load (bezettingsgraad van deze provider)
+            if active_w:
+                load = max(
+                    1 - remaining_capacity[o.provider_id][w] / o.capacity_hrs_per_week
+                    for w in active_w if w in remaining_capacity[o.provider_id]
+                )
+            else:
+                load = 0.0
+
+            distance = travel_hrs[p.patient_id][o.provider_id]
+            distance_normalized = min(distance / 2.0, 1.0)
+
+            penalty = _overcapacity_penalty(
+                p, o, patient_active_weeks, travel_hrs, remaining_capacity
+            )
+
+            # Score combineert load, afstand en de harde/zachte penalty
+            score = (alpha * load) + ((1 - alpha) * distance_normalized) + penalty
+
+            if score < best_score:
+                best_score    = score
+                best_provider = o
+
+        _book_capacity(p, best_provider, patient_active_weeks,
+                       travel_hrs, remaining_capacity,
+                       assignment_map, travel_log, processed)
 
 def assign_patients(method, patients, providers, patient_active_weeks,
                     travel_hrs, remaining_capacity, assignment_map,
@@ -473,27 +525,36 @@ def assign_patients(method, patients, providers, patient_active_weeks,
       'greedy'      — Methode 1: zwaarste eerst + load/afstand score
       'nearest'     — Methode 2: dichtstbijzijnde provider
       'round_robin' — Methode 3: strikt roterend
+      'edd'         — Methode 4: Earliest Due Date (vroegste ontslagdatum eerst)
     """
-    if method == 'greedy':
+    # Zet de input om naar kleine letters om hoofdlettergevoeligheid te voorkomen
+    method_lower = method.lower()
+
+    if method_lower == 'greedy':
         method_greedy_heaviest_first(
             patients, providers, patient_active_weeks, travel_hrs,
             remaining_capacity, assignment_map, travel_log, processed, alpha
         )
-    elif method == 'nearest':
+    elif method_lower == 'nearest':
         method_nearest_provider(
             patients, providers, patient_active_weeks, travel_hrs,
             remaining_capacity, assignment_map, travel_log, processed
         )
-    elif method == 'round_robin':
+    elif method_lower == 'round_robin':
         method_round_robin(
             patients, providers, patient_active_weeks, travel_hrs,
             remaining_capacity, assignment_map, travel_log, processed,
             round_robin_index
         )
+    elif method_lower == 'edd':
+        method_edd(
+            patients, providers, patient_active_weeks, travel_hrs,
+            remaining_capacity, assignment_map, travel_log, processed, alpha
+        )
     else:
         raise ValueError(
             f"Onbekende methode '{method}'. "
-            f"Kies uit: 'greedy', 'nearest', 'round_robin'."
+            f"Kies uit: 'greedy', 'nearest', 'round_robin', 'edd'."
         )
 
 
@@ -737,20 +798,19 @@ def print_results(result: dict, patients: list, providers: list):
     # Waarschuwing bij overschrijding van capaciteit
     overcap = kpis['overcapacity_weeks']
     if any(v > 0 for v in overcap.values()):
-        print(f"\n⚠️  CAPACITEITSOVERSCHRIJDING (weken > 100%):")
+        print(f"\n  CAPACITEITSOVERSCHRIJDING (weken > 100%):")
         for oid, weeks in overcap.items():
             if weeks > 0:
                 print(f"    - {oid}: {weeks} week(en)")
 
-    print("\n📊 KPIs:")
+    print("\n KPIs:")
     print(f"  Totaal toegewezen       : {kpis['total_assigned']}")
     print(f"  Gem. reistijd           : {kpis['avg_travel_hrs']} uur")
     print(f"  Spreiding bezetting     : {kpis['utilization_std_dev_%']}%")
 
     print("\n  Gemiddelde bezettingsgraad per organisatie:")
     for oid, util in kpis['avg_utilization_%'].items():
-        bar = "█" * int(util / 5)
-        print(f"    {oid}: {util:5.1f}%  {bar}")
+        print(f"    {oid}: {util:5.1f}%")
 
     print("\n" + "=" * 60)
 
@@ -768,7 +828,7 @@ if __name__ == "__main__":
     # -------------------------------------------------------------------------
     # Draai alle drie methodes en vergelijk de KPIs
     # -------------------------------------------------------------------------
-    methods = ['greedy', 'nearest', 'round_robin']
+    methods = ['greedy', 'nearest', 'round_robin', 'EDD']
     results = {}
 
     for m in methods:
