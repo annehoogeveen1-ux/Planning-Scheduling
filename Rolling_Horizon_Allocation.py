@@ -602,20 +602,19 @@ def print_results(result: dict, patients: list, providers: list):
     # Waarschuwing bij overschrijding van capaciteit
     overcap = kpis['overcapacity_weeks']
     if any(v > 0 for v in overcap.values()):
-        print(f"\n⚠️  CAPACITEITSOVERSCHRIJDING (weken > 100%):")
+        print(f"\n CAPACITEITSOVERSCHRIJDING (weken > 100%):")
         for oid, weeks in overcap.items():
             if weeks > 0:
                 print(f"    - {oid}: {weeks} week(en)")
 
-    print("\n📊 KPIs:")
+    print("\n KPIs:")
     print(f"  Totaal toegewezen       : {kpis['total_assigned']}")
     print(f"  Gem. reistijd           : {kpis['avg_travel_hrs']} uur")
     print(f"  Spreiding bezetting     : {kpis['utilization_std_dev_%']}%")
 
     print("\n  Gemiddelde bezettingsgraad per organisatie:")
     for oid, util in kpis['avg_utilization_%'].items():
-        bar = "█" * int(util / 5)
-        print(f"    {oid}: {util:5.1f}%  {bar}")
+        print(f"    {oid}: {util:5.1f}%")
 
     print("\n" + "=" * 60)
 
