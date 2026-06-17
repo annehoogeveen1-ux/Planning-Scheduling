@@ -3,6 +3,7 @@
 Install necessary requirements:
 
 pip install geopy 
+pip install streamlit
 
 
 

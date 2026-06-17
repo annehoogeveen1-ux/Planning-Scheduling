@@ -529,5 +529,17 @@ st.subheader("Toewijzingen per homecare")
 st.plotly_chart(build_assignment_chart(assignment_df, provider_df), use_container_width=True, config={"displayModeBar": False})
 
 
+if __name__ == "__main__":
+    # Dit blok code wordt alléén uitgevoerd als je op de 'Play'-knop drukt.
+    # Als Streamlit de app zelf runt, negeert hij dit deel.
+    import os
+    import subprocess
+    import sys
+
+    # Controleer of het script al binnen Streamlit draait
+    if not os.environ.get("STREAMLIT_SERVER_RUN_ON_SAVE"):
+        # Start de Streamlit server op de achtergrond met de actieve Python-versie
+        subprocess.run([sys.executable, "-m", "streamlit", "run", __file__])
 
 #C:\Users\krisl\AppData\Local\Python\pythoncore-3.14-64\python.exe -m streamlit run Streamlit_App.py
+#C:/Users/tomto/AppData/Local/Programs/Python/Python313/python.exe -m streamlit run "c:/Users/tomto/OneDrive/Documents/School/MSc/6. MSc Y2Q4/PS Planning and Scheduling/Planning-Scheduling/Streamlit_App.py"
