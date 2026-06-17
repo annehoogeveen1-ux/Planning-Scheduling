@@ -1,5 +1,18 @@
 from __future__ import annotations
 
+import os
+import sys
+import subprocess
+
+# Dwing het script om direct via Streamlit te herstarten ALS het met de Play-knop is opgestart
+if "streamlit" not in sys.modules and "-m" not in sys.argv:
+    if not os.environ.get("STREAMLIT_ALREADY_RUNNING"):
+        os.environ["STREAMLIT_ALREADY_RUNNING"] = "1"
+        print("Dashboard wordt opgestart in de browser via Streamlit...")
+        subprocess.run([sys.executable, "-m", "streamlit", "run", __file__])
+        sys.exit()
+
+        
 from pathlib import Path
 import sys
 from datetime import timedelta
@@ -528,18 +541,6 @@ with mid_cols[1]:
 st.subheader("Toewijzingen per homecare")
 st.plotly_chart(build_assignment_chart(assignment_df, provider_df), use_container_width=True, config={"displayModeBar": False})
 
-
-if __name__ == "__main__":
-    # Dit blok code wordt alléén uitgevoerd als je op de 'Play'-knop drukt.
-    # Als Streamlit de app zelf runt, negeert hij dit deel.
-    import os
-    import subprocess
-    import sys
-
-    # Controleer of het script al binnen Streamlit draait
-    if not os.environ.get("STREAMLIT_SERVER_RUN_ON_SAVE"):
-        # Start de Streamlit server op de achtergrond met de actieve Python-versie
-        subprocess.run([sys.executable, "-m", "streamlit", "run", __file__])
 
 #C:\Users\krisl\AppData\Local\Python\pythoncore-3.14-64\python.exe -m streamlit run Streamlit_App.py
 #C:/Users/tomto/AppData/Local/Programs/Python/Python313/python.exe -m streamlit run "c:/Users/tomto/OneDrive/Documents/School/MSc/6. MSc Y2Q4/PS Planning and Scheduling/Planning-Scheduling/Streamlit_App.py"
