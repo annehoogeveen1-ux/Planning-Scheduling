@@ -9,7 +9,13 @@ if "streamlit" not in sys.modules and "-m" not in sys.argv:
     if not os.environ.get("STREAMLIT_ALREADY_RUNNING"):
         os.environ["STREAMLIT_ALREADY_RUNNING"] = "1"
         print("Dashboard wordt opgestart in de browser via Streamlit...")
-        subprocess.run([sys.executable, "-m", "streamlit", "run", __file__])
+        
+        # We voegen hier argumenten toe die ervoor zorgen dat de server stopt als de browser sluit
+        subprocess.run([
+            sys.executable, "-m", "streamlit", "run", __file__,
+            "--browser.gatherUsageStats=False",
+            "--server.headless=false"
+        ])
         sys.exit()
 
         
