@@ -266,9 +266,10 @@ def generate_weeks(start: date, end: date) -> list:
 
 def active_weeks_for_patient(patient: Patient, horizon_end: date, all_weeks: list) -> list:
     effective_end = min(patient.care_end, horizon_end)
-    return [w for w in all_weeks if patient.discharge_date <= w < effective_end]
-
-
+    return [
+        w for w in all_weeks
+        if w < effective_end and (w + timedelta(weeks=1)) > patient.discharge_date
+    ]
 # =============================================================================
 # TRAVEL TIME CALCULATION
 # =============================================================================
@@ -326,7 +327,7 @@ def _overcapacity_penalty(p, o, patient_active_weeks, remaining_capacity):
             needed = p.visit_hours
             deficit = needed - remaining_capacity[o.provider_id][w]
             if deficit > 0:
-                penalty = max(penalty, OVERCAPACITY_PENALTY_WEIGHT * deficit)
+                penalty = max(penalty, deficit)
     return penalty
 
 
@@ -360,7 +361,7 @@ def method_greedy_heaviest_first(patients, providers, patient_active_weeks, dist
             distance_normalized = min(t_hours / MAX_TRAVEL_HOURS, 1.0)
             penalty = _overcapacity_penalty(p, o, patient_active_weeks, remaining_capacity)
             
-            score = (alpha * load) + ((1 - alpha) * distance_normalized) + penalty
+            score = (alpha * load) + ((1 - alpha) * distance_normalized) + (OVERCAPACITY_PENALTY_WEIGHT * penalty)
 
             if score < best_score:
                 best_score = score
@@ -446,7 +447,7 @@ def method_edd(patients, providers, patient_active_weeks, distance_km, remaining
             distance_normalized = min(t_hours / MAX_TRAVEL_HOURS, 1.0)
             penalty = _overcapacity_penalty(p, o, patient_active_weeks, remaining_capacity)
 
-            score = (alpha * load) + ((1 - alpha) * distance_normalized) + penalty
+            score = (alpha * load) + ((1 - alpha) * distance_normalized) + (OVERCAPACITY_PENALTY_WEIGHT * penalty)
 
             if score < best_score:
                 best_score = score
@@ -521,9 +522,7 @@ def rolling_horizon_assignment(patients: list, providers: list, alpha: float = 0
             continue
 
         horizon_end = max(p.discharge_date for p in known_patients)
-        weeks = generate_weeks(t, horizon_end)
-
-        patient_active_weeks = {p.patient_id: active_weeks_for_patient(p, horizon_end, weeks) for p in known_patients}
+        patient_active_weeks = {p.patient_id: active_weeks_for_patient(p, horizon_end, all_weeks) for p in known_patients}
 
         distance_km = {}
         for p in known_patients:
