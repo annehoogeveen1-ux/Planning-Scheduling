@@ -88,7 +88,7 @@ def run_assignment(patients, providers, method, scenario_name):
     for hco, weeks in kpi["overcapacity_weeks"].items():
         row[f"{hco}_overcap_weeks"] = weeks
 
-    return row
+    return row, kpi["weekly_utilization"]
 
 
 # ============================================================
@@ -111,6 +111,7 @@ base_capacity = {
 # ============================================================
 
 results = []
+weekly_rows = []
 
 for scenario_name, load_profile in UNEQUAL_LOAD_SCENARIOS.items():
     for method in METHODS:
@@ -129,14 +130,24 @@ for scenario_name, load_profile in UNEQUAL_LOAD_SCENARIOS.items():
             provider.capacity_hrs_per_week = capacity
             provider.initial_load_hrs_per_week = capacity * load_profile[provider_id]
 
-        results.append(
-            run_assignment(
-                patients=patients,
-                providers=providers,
-                method=method,
-                scenario_name=scenario_name,
-            )
+        summary_row, weekly_utilization = run_assignment(
+            patients=patients,
+            providers=providers,
+            method=method,
+            scenario_name=scenario_name,
         )
+
+        results.append(summary_row)
+        for hco, week_data in weekly_utilization.items():
+            for week, util_pct in week_data.items():
+                weekly_rows.append({
+                    "scenario": scenario_name,
+                    "method": method,
+                    "provider_id": hco,
+                    "week": week,
+                    "utilization_pct": util_pct,
+                })
+
 
 df = pd.DataFrame(results)
 
@@ -221,6 +232,46 @@ plot_bar_by_scenario(
     title="Effect of unequal initial load on overcapacity",
     filename="Unequal_Load_Overcapacity.png",
 )
+
+
+df_weekly = pd.DataFrame(weekly_rows)
+
+if not df_weekly.empty:
+    df_weekly.to_excel(os.path.join(OUTPUT_DIR, "Provider_Stress_Weekly_Utilization.xlsx"), index=False)
+
+    weekly_dir = os.path.join(OUTPUT_DIR, "Weekly_Utilization_By_Scenario")
+    os.makedirs(weekly_dir, exist_ok=True)
+
+    def plot_weekly_utilization_by_method(df_weekly, scenario, method, filename):
+        subset = df_weekly[(df_weekly["scenario"] == scenario) & (df_weekly["method"] == method)].copy()
+        if subset.empty:
+            return
+        pivot = (
+            subset.groupby(["week", "provider_id"])["utilization_pct"]
+            .mean()
+            .unstack("provider_id")
+            .sort_index()
+        )
+        ax = pivot.plot(figsize=(12, 6), marker="o")
+        ax.set_xlabel("Week")
+        ax.set_ylabel("Utilization (%)")
+        ax.set_title(f"Weekly Capacity Utilization per HCO — {scenario} — {method.replace('_', ' ').title()}")
+        plt.xticks(rotation=45, ha="right")
+        plt.legend(title="HCO")
+        plt.tight_layout()
+        plt.savefig(filename, dpi=300)
+        plt.close()
+
+    for scenario in sorted(df_weekly["scenario"].unique()):
+        scenario_dir = os.path.join(weekly_dir, scenario)
+        os.makedirs(scenario_dir, exist_ok=True)
+        for method in METHODS:
+            plot_weekly_utilization_by_method(
+                df_weekly,
+                scenario,
+                method,
+                filename=os.path.join(scenario_dir, f"Weekly_Utilization_{method}.png"),
+            )
 
 
 # ============================================================
