@@ -6,6 +6,8 @@ from collections import defaultdict
 from typing import Optional
 
 
+
+
 # =============================================================================
 # CONSTANTS
 # =============================================================================
@@ -15,6 +17,8 @@ from typing import Optional
 # ALWAYS takes precedence over an assignment with violation,
 # regardless of load/distance differences (which lie in the range [0,1]).
 OVERCAPACITY_PENALTY_WEIGHT = 10.0
+TRAVEL_SPEED_KMH = 30.0
+MAX_TRAVEL_HOURS = 1.0
 
 
 # =============================================================================
@@ -140,10 +144,6 @@ def active_weeks_for_patient(patient: Patient, horizon_end: date, all_weeks: lis
 # =============================================================================
 # TRAVEL TIME CALCULATION
 # =============================================================================
-
-TRAVEL_SPEED_KMH = 30.0
-MAX_TRAVEL_HOURS = 1.0
-
 
 def travel_hours(distance_km: float, speed_kmh: float = TRAVEL_SPEED_KMH) -> float:
     DETOUR_FACTOR = 1.3  
