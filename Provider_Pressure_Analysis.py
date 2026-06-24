@@ -77,7 +77,7 @@ def run_assignment(patients, providers, method, scenario_name):
         "lookahead_days": LOOKAHEAD_DAYS,
         "penalty": PENALTY,
         "total_assigned": kpi["total_assigned"],
-        "avg_distance_km": round(kpi.get("avg_travel_hours", 0.0) * 30.0 / 1.3, 2),
+        "avg_travel_hours": round(kpi.get("avg_travel_hours", 0.0), 2),
         "util_std_dev": kpi["utilization_std_dev_%"],
         "overcap_weeks_total": sum(kpi["overcapacity_weeks"].values()),
     }
@@ -152,7 +152,7 @@ summary_by_method = (
     df.groupby("method")
     .agg({
         "util_std_dev": ["mean", "min", "max"],
-        "avg_distance_km": ["mean", "min", "max"],
+        "avg_travel_hours": ["mean", "min", "max"],
         "overcap_weeks_total": ["mean", "min", "max"],
         "total_assigned": ["mean", "min", "max"],
     })
@@ -167,7 +167,7 @@ summary_by_scenario = (
     df.groupby(["scenario", "method"])
     .agg({
         "util_std_dev": "mean",
-        "avg_distance_km": "mean",
+        "avg_travel_hours": "mean",
         "overcap_weeks_total": "mean",
     })
     .reset_index()
@@ -208,10 +208,10 @@ plot_bar_by_scenario(
 
 plot_bar_by_scenario(
     summary_by_scenario,
-    y_col="avg_distance_km",
-    ylabel="Average distance per assignment (km)",
-    title="Effect of unequal initial load on travel distance",
-    filename="Unequal_Load_Avg_Distance.png",
+    y_col="avg_travel_hours",
+    ylabel="Average travel time per assignment (hrs)",
+    title="Effect of unequal initial load on travel time",
+    filename="Unequal_Load_Avg_Travel_Hours.png",
 )
 
 plot_bar_by_scenario(
@@ -239,5 +239,5 @@ print("- Provider_Stress_Results.csv")
 print("- Summary_By_Method.xlsx")
 print("- Summary_By_Scenario.xlsx")
 print("- Unequal_Load_Utilization_Std.png")
-print("- Unequal_Load_Avg_Distance.png")
+print("- Unequal_Load_Avg_Travel_Hours.png")
 print("- Unequal_Load_Overcapacity.png")
