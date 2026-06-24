@@ -419,7 +419,7 @@ def plot_kpi_summary(all_results: dict, providers: list):
     
     # Create the figure dashboard
     fig = plt.figure(figsize=(14, 10))
-    fig.suptitle("Dispatching Strategies KPI Dashboard", fontsize=16, fontweight="bold")
+    fig.suptitle("Dispatching Strategies KPIs", fontsize=16, fontweight="bold")
     gs = fig.add_gridspec(2, 2, height_ratios=[1, 1.2])
     
     # --- Plot 1: Average Travel Time (Top Left) ---
@@ -506,7 +506,7 @@ if __name__ == "__main__":
             plot_utilization(method, result, patients_copy)
             
         # Generate the master dashboard after all methods are finished
-        print("Generating KPI Summary Dashboard (kpi_summary_dashboard.png)...")
+        print("Generating KPI Summary(kpi_summary_dashboard.png)...")
         plot_kpi_summary(all_results, base_providers)
             
     except FileNotFoundError:
