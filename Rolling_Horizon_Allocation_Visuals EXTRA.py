@@ -1,4 +1,5 @@
 import math
+import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
@@ -7,21 +8,13 @@ from dataclasses import dataclass, field
 from collections import defaultdict
 from typing import Optional
 
-
-
-
 # =============================================================================
 # CONSTANTS
 # =============================================================================
 
-# Weight for the overcapacity penalty in the score function.
-# Chosen high enough so that an assignment without violation
-# ALWAYS takes precedence over an assignment with violation,
-# regardless of load/distance differences (which lie in the range [0,1]).
 OVERCAPACITY_PENALTY_WEIGHT = 10.0
 TRAVEL_SPEED_KMH = 30.0
 MAX_TRAVEL_HOURS = 1.0
-
 
 # =============================================================================
 # DATA CLASSES
@@ -48,19 +41,11 @@ class Provider:
     capacity_hrs_per_week: float
     initial_load_hrs_per_week: float = 0.0  # current caseload in hours
 
-
 # =============================================================================
 # CSV LOADING
 # =============================================================================
 
 def load_providers_from_csv(filepath: str) -> list:
-    """
-    Loads home care organizations from a CSV file.
-
-    Expected format:
-        provider_id,latitude,longitude,capacity_hrs_per_week,initial_load_hrs_per_week
-        ThuiszorgA,52.21,6.89,80.0,55.0
-    """
     df = pd.read_csv(filepath, dtype={'provider_id': str})
 
     required_cols = {'provider_id', 'latitude', 'longitude', 'capacity_hrs_per_week'}
@@ -78,18 +63,9 @@ def load_providers_from_csv(filepath: str) -> list:
             capacity_hrs_per_week=float(row['capacity_hrs_per_week']),
             initial_load_hrs_per_week=float(row['initial_load_hrs_per_week']) if has_initial_load else 0.0
         ))
-
     return providers
 
-
 def load_patients_from_csv(filepath: str) -> list:
-    """
-    Loads patients from a CSV file.
-
-    Expected format:
-        patient_id,discharge_date,length_of_stay,visit_hours,latitude,longitude
-        P0001,2024-01-03,28,4,52.30,5.76
-    """
     df = pd.read_csv(filepath, dtype={'patient_id': str}, parse_dates=['discharge_date'])
 
     required_cols = {'patient_id', 'discharge_date', 'length_of_stay', 'visit_hours', 'latitude', 'longitude'}
@@ -106,7 +82,6 @@ def load_patients_from_csv(filepath: str) -> list:
             visit_hours=float(row['visit_hours']),
             home_coords=(float(row['latitude']), float(row['longitude']))
         ))
-
     return patients
 
 # =============================================================================
@@ -114,7 +89,6 @@ def load_patients_from_csv(filepath: str) -> list:
 # =============================================================================
 
 def haversine_km(coord1: tuple, coord2: tuple) -> float:
-    """ Calculates the great-circle distance in kilometers. """
     R = 6371 
     lat1, lon1 = math.radians(coord1[0]), math.radians(coord1[1])
     lat2, lon2 = math.radians(coord2[0]), math.radians(coord2[1])
@@ -126,7 +100,6 @@ def haversine_km(coord1: tuple, coord2: tuple) -> float:
     c = 2 * math.asin(math.sqrt(a))
     return R * c
 
-
 def generate_weeks(start: date, end: date) -> list:
     current = start - timedelta(days=start.weekday())
     weeks = []
@@ -134,7 +107,6 @@ def generate_weeks(start: date, end: date) -> list:
         weeks.append(current)
         current += timedelta(weeks=1)
     return weeks
-
 
 def active_weeks_for_patient(patient: Patient, horizon_end: date, all_weeks: list) -> list:
     effective_end = min(patient.care_end, horizon_end)
@@ -152,7 +124,6 @@ def travel_hours(distance_km: float, speed_kmh: float = TRAVEL_SPEED_KMH) -> flo
     road_distance_km = distance_km * DETOUR_FACTOR
     return road_distance_km / speed_kmh
 
-
 # =============================================================================
 # ASSIGNMENT METHODS
 # =============================================================================
@@ -166,7 +137,6 @@ def _book_capacity(p, best_provider, patient_active_weeks, distance_km, remainin
     distance_log[p.patient_id] = travel_hours(distance_km[p.patient_id][best_provider.provider_id])
     processed.add(p.patient_id)
 
-
 def _overcapacity_penalty(p, o, patient_active_weeks, remaining_capacity):
     penalty = 0.0
     for w in patient_active_weeks[p.patient_id]:
@@ -176,7 +146,6 @@ def _overcapacity_penalty(p, o, patient_active_weeks, remaining_capacity):
             if deficit > 0:
                 penalty = max(penalty, deficit)
     return penalty
-
 
 def method_greedy_heaviest_first(patients, providers, patient_active_weeks, distance_km, remaining_capacity, assignment_map, distance_log, processed, alpha, **kwargs):
     patients_sorted = sorted(patients, key=lambda p: p.visit_hours, reverse=True)
@@ -207,7 +176,6 @@ def method_greedy_heaviest_first(patients, providers, patient_active_weeks, dist
 
         _book_capacity(p, best_provider, patient_active_weeks, distance_km, remaining_capacity, assignment_map, distance_log, processed)
 
-
 def method_nearest_provider(patients, providers, patient_active_weeks, distance_km, remaining_capacity, assignment_map, distance_log, processed, **kwargs):
     patients_sorted = sorted(patients, key=lambda p: p.discharge_date)
 
@@ -229,7 +197,6 @@ def method_nearest_provider(patients, providers, patient_active_weeks, distance_
 
         _book_capacity(p, best_provider, patient_active_weeks, distance_km, remaining_capacity, assignment_map, distance_log, processed)
 
-
 def method_round_robin(patients, providers, patient_active_weeks, distance_km, remaining_capacity, assignment_map, distance_log, processed, round_robin_index, **kwargs):
     patients_sorted = sorted(patients, key=lambda p: p.discharge_date)
 
@@ -241,7 +208,6 @@ def method_round_robin(patients, providers, patient_active_weeks, distance_km, r
         round_robin_index[0] += 1
 
         _book_capacity(p, chosen, patient_active_weeks, distance_km, remaining_capacity, assignment_map, distance_log, processed)
-
 
 def method_edd(patients, providers, patient_active_weeks, distance_km, remaining_capacity, assignment_map, distance_log, processed, alpha=0.5, **kwargs):
     patients_sorted = sorted(patients, key=lambda p: p.discharge_date)
@@ -272,7 +238,6 @@ def method_edd(patients, providers, patient_active_weeks, distance_km, remaining
 
         _book_capacity(p, best_provider, patient_active_weeks, distance_km, remaining_capacity, assignment_map, distance_log, processed)
 
-
 def assign_patients(method, patients, providers, patient_active_weeks, distance_km, remaining_capacity, assignment_map, distance_log, processed, alpha, round_robin_index):
     method_lower = method.lower()
     if method_lower == 'greedy':
@@ -286,7 +251,6 @@ def assign_patients(method, patients, providers, patient_active_weeks, distance_
     else:
         raise ValueError(f"Unknown method '{method}'.")
     
-
 # =============================================================================
 # ROLLING HORIZON ALGORITHM
 # =============================================================================
@@ -294,7 +258,7 @@ def assign_patients(method, patients, providers, patient_active_weeks, distance_
 def rolling_horizon_assignment(patients: list, providers: list, alpha: float = 0.5, lookahead_days: int = 7, method: str = 'greedy') -> dict:
     all_discharge_dates = sorted(set(p.discharge_date for p in patients))
     global_horizon_start = min(p.discharge_date for p in patients)
-    global_horizon_end = max(p.discharge_date for p in patients)
+    global_horizon_end = max(p.care_end for p in patients)
     all_weeks = generate_weeks(global_horizon_start, global_horizon_end)
 
     remaining_capacity = {
@@ -314,7 +278,7 @@ def rolling_horizon_assignment(patients: list, providers: list, alpha: float = 0
         if not known_patients:
             continue
 
-        horizon_end = max(p.discharge_date for p in known_patients)
+        horizon_end = global_horizon_end 
         patient_active_weeks = {p.patient_id: active_weeks_for_patient(p, horizon_end, all_weeks) for p in known_patients}
 
         distance_km = {}
@@ -331,7 +295,6 @@ def rolling_horizon_assignment(patients: list, providers: list, alpha: float = 0
 
     kpis = compute_kpis(assignment_map, remaining_capacity, providers, all_weeks, distance_log)
     return {'assignments': assignment_map, 'remaining_capacity': remaining_capacity, 'kpis': kpis}
-
 
 # =============================================================================
 # KPI CALCULATION & DISPLAY
@@ -366,9 +329,9 @@ def compute_kpis(assignment_map, remaining_capacity, providers, all_weeks, dista
         'avg_travel_hours': avg_distance,
         'avg_utilization_%': avg_utilization,
         'utilization_std_dev_%': std_util,
-        'overcapacity_weeks': overcapacity_weeks
+        'overcapacity_weeks': overcapacity_weeks,
+        'weekly_utilization': utilization 
     }
-
 
 def print_results(method_name: str, result: dict, providers: list):
     kpis = result['kpis']
@@ -394,6 +357,116 @@ def print_results(method_name: str, result: dict, providers: list):
         
     print("=" * 70 + "\n")
 
+# =============================================================================
+# PLOTTING FUNCTIONS
+# =============================================================================
+
+def plot_utilization(method_name: str, result: dict, patients: list):
+    """
+    Plots weekly utilization on the left axis and active patient volume on the right axis.
+    """
+    weekly_util = result['kpis']['weekly_utilization']
+    all_weeks = sorted(list(next(iter(weekly_util.values())).keys()))
+    
+    # --- Calculate Active Patients per week ---
+    # We count how many patients are 'active' (receiving care) in each week
+    patient_volume = []
+    for w in all_weeks:
+        week_start = w
+        week_end = w + timedelta(days=6)
+        active_count = sum(1 for p in patients if p.discharge_date <= week_end and p.care_end >= week_start)
+        patient_volume.append(active_count)
+
+    # --- Plotting ---
+    fig, ax1 = plt.subplots(figsize=(12, 6))
+    
+    # Left Axis: Utilization
+    for provider_id, util_data in weekly_util.items():
+        util_values = [util_data[w] for w in all_weeks]
+        ax1.plot(all_weeks, util_values, marker='o', markersize=3, label=f"{provider_id} Util %", linestyle='-')
+        
+    ax1.set_xlabel("Date (Weeks)")
+    ax1.set_ylabel("Utilization (%)")
+    ax1.set_ylim(0, 110) # Set a fixed ceiling
+    ax1.legend(loc='upper left')
+    ax1.grid(True, linestyle='--', alpha=0.5)
+    
+    # Right Axis: Patient Volume
+    ax2 = ax1.twinx()
+    ax2.fill_between(all_weeks, patient_volume, color='gray', alpha=0.1, label="Active Patients")
+    ax2.plot(all_weeks, patient_volume, color='black', linestyle=':', linewidth=2, label="Total Active Patients")
+    
+    ax2.set_ylabel("Number of Active Patients")
+    ax2.legend(loc='upper right')
+    
+    # Formatting
+    plt.title(f"Utilization vs. Patient Volume - {method_name.upper()} Strategy", fontweight="bold")
+    plt.setp(ax1.get_xticklabels(), rotation=45, ha='right')
+    fig.tight_layout()
+    
+    plt.savefig(f"utilization_volume_{method_name}.png")
+    plt.close(fig)
+
+def plot_kpi_summary(all_results: dict, providers: list):
+    """
+    Creates a master dashboard comparing the key metrics across all dispatching rules.
+    """
+    methods = [m.upper() for m in all_results.keys()]
+    
+    # Extract KPI lists
+    avg_travel = [all_results[m]['kpis']['avg_travel_hours'] for m in all_results]
+    std_devs = [all_results[m]['kpis']['utilization_std_dev_%'] for m in all_results]
+    
+    # Create the figure dashboard
+    fig = plt.figure(figsize=(14, 10))
+    fig.suptitle("Dispatching Strategies KPI Dashboard", fontsize=16, fontweight="bold")
+    gs = fig.add_gridspec(2, 2, height_ratios=[1, 1.2])
+    
+    # --- Plot 1: Average Travel Time (Top Left) ---
+    ax1 = fig.add_subplot(gs[0, 0])
+    bars1 = ax1.bar(methods, avg_travel, color='skyblue', edgecolor='black')
+    ax1.set_title("Average Travel Time per Patient (Lower is Better)")
+    ax1.set_ylabel("Hours")
+    ax1.bar_label(bars1, fmt='%.2f', padding=3)
+    ax1.grid(axis='y', linestyle='--', alpha=0.6)
+    
+    # --- Plot 2: Utilization Standard Deviation (Top Right) ---
+    ax2 = fig.add_subplot(gs[0, 1])
+    bars2 = ax2.bar(methods, std_devs, color='salmon', edgecolor='black')
+    ax2.set_title("Workload Imbalance (Std. Dev.) (Lower is Better)")
+    ax2.set_ylabel("Standard Deviation (%)")
+    ax2.bar_label(bars2, fmt='%.1f%%', padding=3)
+    ax2.grid(axis='y', linestyle='--', alpha=0.6)
+    
+    # --- Plot 3: Average Utilization per Provider (Bottom) ---
+    ax3 = fig.add_subplot(gs[1, :])
+    
+    x = np.arange(len(methods))
+    num_providers = len(providers)
+    width = 0.8 / num_providers # Dynamically scale bar width
+    
+    # Create offsets so the bars group neatly around the tick center
+    offsets = np.linspace(-width * (num_providers - 1) / 2, width * (num_providers - 1) / 2, num_providers)
+    
+    colors = ['#2ca02c', '#ff7f0e', '#1f77b4', '#9467bd', '#8c564b'] # Add more colors if you have more than 5 providers
+    
+    for i, provider in enumerate(providers):
+        provider_id = provider.provider_id
+        utils = [all_results[m]['kpis']['avg_utilization_%'].get(provider_id, 0) for m in all_results]
+        
+        rects = ax3.bar(x + offsets[i], utils, width, label=provider_id, color=colors[i % len(colors)], edgecolor='black')
+        ax3.bar_label(rects, fmt='%.1f%%', padding=3, fontsize=9)
+    
+    ax3.set_title("Average Yearly Utilization per Provider")
+    ax3.set_ylabel("Average Utilization (%)")
+    ax3.set_xticks(x)
+    ax3.set_xticklabels(methods)
+    ax3.legend(title="Healthcare Providers", loc='lower right')
+    ax3.grid(axis='y', linestyle='--', alpha=0.6)
+    
+    fig.tight_layout(rect=[0, 0, 1, 0.96]) # Adjust to fit the suptitle
+    plt.savefig("kpi_summary_dashboard.png", dpi=150)
+    plt.close(fig)
 
 # =============================================================================
 # MAIN EXECUTION
@@ -407,6 +480,9 @@ if __name__ == "__main__":
         base_providers = load_providers_from_csv("providers.csv")
 
         methods_to_run = ['greedy', 'nearest', 'round_robin', 'edd']
+        
+        # We will store the results of all methods in this dictionary to plot them together later
+        all_results = {}
 
         for method in methods_to_run:
             patients_copy = copy.deepcopy(base_patients)
@@ -420,7 +496,18 @@ if __name__ == "__main__":
                 method=method
             )
             
+            # Store the result
+            all_results[method] = result
+            
+            # Print the terminal output
             print_results(method, result, providers_copy)
+            
+            # Generate the individual timeline visualization
+            plot_utilization(method, result, patients_copy)
+            
+        # Generate the master dashboard after all methods are finished
+        print("Generating KPI Summary Dashboard (kpi_summary_dashboard.png)...")
+        plot_kpi_summary(all_results, base_providers)
             
     except FileNotFoundError:
         print("Notice: Please place 'patients.csv' and 'providers.csv' in the same directory to run.")
