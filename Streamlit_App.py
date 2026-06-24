@@ -10,12 +10,17 @@ if "streamlit" not in sys.modules and "-m" not in sys.argv:
     if not os.environ.get("STREAMLIT_ALREADY_RUNNING"):
         os.environ["STREAMLIT_ALREADY_RUNNING"] = "1"
         print("Dashboard wordt opgestart in de browser via Streamlit...")
-        subprocess.run([sys.executable, "-m", "streamlit", "run", __file__])
+        
+        # We voegen hier argumenten toe die ervoor zorgen dat de server stopt als de browser sluit
+        subprocess.run([
+            sys.executable, "-m", "streamlit", "run", __file__,
+            "--browser.gatherUsageStats=False",
+            "--server.headless=false"
+        ])
         sys.exit()
 
         
 from pathlib import Path
-import sys
 from datetime import timedelta
 
 import pandas as pd
@@ -47,8 +52,10 @@ px.defaults.template = "plotly_white"
 DEFAULT_PATIENTS_FILE = PROJECT_DIR / "patients.csv"
 DEFAULT_PROVIDERS_FILE = PROJECT_DIR / "providers.csv"
 
+# Uitgebreide strategieën mappping inclusief EDD
 STRATEGY_OPTIONS = {
-    "Zwaarste last eerst": "heaviest_load_first",
+    "Zwaarste last eerst (visit_hours DESC)": "heaviest_load_first",
+    "EDD (Earliest Due Date / discharge_date ASC)": "edd",
     "Round-robin": "round_robin",
     "Afstandsbewust": "distance_aware",
 }
@@ -123,19 +130,27 @@ def active_chart_weeks(discharge_date, length_of_stay) -> list[pd.Timestamp]:
 
 
 def order_patients(known_patients: list[Patient], strategy: str, travel_matrix: dict) -> list[Patient]:
+    """Sorteert de bekende patiënten binnen het huidige window op basis van de gekozen strategie."""
     if strategy == "round_robin":
         return sorted(known_patients, key=lambda p: (p.discharge_date, p.patient_id))
 
-    if strategy == "distance_aware":
+    elif strategy == "edd":
+        # Earliest Due Date (Sorteer op vroegste ontslagdatum eerst)
+        return sorted(known_patients, key=lambda p: (p.discharge_date, -p.visit_hours, p.patient_id))
+
+    elif strategy == "distance_aware":
+        # Sorteer op patiënten die het dichtst bij een thuiszorgorganisatie wonen
         return sorted(
             known_patients,
             key=lambda p: (min(travel_matrix[p.patient_id].values()), -p.visit_hours, p.discharge_date),
         )
 
-    return sorted(
-        known_patients,
-        key=lambda p: (-p.visit_hours, -p.length_of_stay, p.discharge_date, p.patient_id),
-    )
+    else:
+        # Default/Heaviest load first: Sorteer op meeste zorguren per week, daarna op totale duur
+        return sorted(
+            known_patients,
+            key=lambda p: (-p.visit_hours, -p.length_of_stay, p.discharge_date, p.patient_id),
+        )
 
 
 def choose_provider(
@@ -151,6 +166,7 @@ def choose_provider(
 ) -> Provider:
     active_weeks = active_periods.get(patient.patient_id, [])
 
+    # STRATEGIE: Round-robin (Behoudt de klassieke verdeellogica)
     if strategy == "round_robin":
         ordered = providers[rr_state["next_index"]:] + providers[: rr_state["next_index"]]
         best_provider = None
@@ -173,6 +189,7 @@ def choose_provider(
         rr_state["next_index"] = (rr_state["next_index"] + 1) % len(providers)
         return best_provider
 
+    # STRATEGIEËN: Heaviest Load First, EDD en Afstandsbewust (maken gebruik van de scorefunctie)
     best_provider = None
     best_score = float("inf")
 
@@ -198,8 +215,13 @@ def choose_provider(
                 penalty = max(penalty, overcapacity_penalty_weight * deficit)
 
         if strategy == "distance_aware":
+            # Extra nadruk op afstand (80% afstand, 20% belasting) + penalty
             score = 0.80 * distance_norm + 0.20 * load + penalty
+        elif strategy == "edd":
+            # EDD maakt gebruik van de reguliere alpha-balans, maar de wachtrijvolgorde is anders
+            score = alpha * load + (1 - alpha) * distance_norm + penalty
         else:
+            # Heaviest load first (Klassieke multi-objective score)
             score = alpha * load + (1 - alpha) * distance_norm + penalty
 
         if score < best_score:
@@ -460,6 +482,17 @@ with control_cols[4]:
     avg_speed_kmh = st.slider("Snelheid", 10, 80, 30, 5)
 with control_cols[5]:
     penalty_weight = st.slider("Penalty", 1.0, 25.0, float(OVERCAPACITY_PENALTY_WEIGHT), 1.0)
+with control_cols[7]:
+    split_by = st.selectbox("Verdeling", ["Homecare", "Zorgtype"], index=0)
+
+if data_mode == "Reële data" and real_data_available:
+    patient_df = load_patient_df(DEFAULT_PATIENTS_FILE)
+    provider_df = load_provider_df(DEFAULT_PROVIDERS_FILE)
+else:
+    provider_df = build_dummy_providers()
+    n_dummy_patients = st.slider("Aantal dummy patiënten", 20, 250, 80, 10)
+    patient_df = build_dummy_patients(n_dummy_patients)
+
 assignment_df, utilization_df, activity_df, kpis = run_dashboard_allocation(
     patient_df=patient_df,
     provider_df=provider_df,
@@ -497,5 +530,15 @@ st.subheader("Toewijzingen per homecare")
 st.plotly_chart(build_assignment_chart(assignment_df, provider_df), use_container_width=True, config={"displayModeBar": False})
 
 
-#C:\Users\krisl\AppData\Local\Python\pythoncore-3.14-64\python.exe -m streamlit run Streamlit_App.py
-#C:/Users/tomto/AppData/Local/Programs/Python/Python313/python.exe -m streamlit run "c:/Users/tomto/OneDrive/Documents/School/MSc/6. MSc Y2Q4/PS Planning and Scheduling/Planning-Scheduling/Streamlit_App.py"
+# ==========================================
+# Knop om de applicatie netjes te sluiten
+# ==========================================
+st.sidebar.markdown("---")
+if st.sidebar.button("🔴 Sluit Dashboard & Terminal"):
+    st.sidebar.success("Dashboard wordt afgesloten...")
+    import os
+    import signal
+    os.kill(os.getpid(), signal.SIGTERM)
+
+
+    

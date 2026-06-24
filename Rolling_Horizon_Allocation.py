@@ -1,6 +1,5 @@
 """
-=============================================================================
-TACTISCH THUISZORG TOEWIJZINGSALGORITME — ROLLING HORIZON
+TACTISCH THUISZORG TOEWIJZINGSALGORITME — ROLLING HORIZON (AFSTANDSGEBASEERD)
 =============================================================================
 
 PSEUDOCODE (volledig):
@@ -44,11 +43,10 @@ OUTER LOOP — Rolling Horizon
                                < MIN(care_end, horizon_end)}
 
       ────────────────────────────────────────────────
-      STEP 3 — Bereken reistijd per combinatie
+      STEP 3 — Bereken afstand per combinatie
       ────────────────────────────────────────────────
       FOR each patient p, FOR each provider o:
-          travel_hrs[p][o] = haversine(p.coords, o.coords)
-                             / avg_speed_kmh * 2   // heen + terug
+          distance_km[p][o] = haversine(p.coords, o.coords)
 
       ────────────────────────────────────────────────
       STEP 4 — Sorteer patiënten (zwaarste eerst)
@@ -71,37 +69,34 @@ OUTER LOOP — Rolling Horizon
               load     = MAX over active_weeks of
                          (1 - remaining_capacity[o][w]
                               / o.capacity_hrs_per_week)
-              distance = travel_hrs[p][o]
+              distance = distance_km[p][o]
 
               // OVERCAPACITY PENALTY (zachte grens, geen afwijzing)
-              // Als toewijzing capaciteit zou overschrijden, voeg
-              // zware straf toe i.p.v. provider uit te sluiten.
               overcap_penalty = 0
               FOR each week w in p.active_weeks:
-                  needed  = p.visit_hours + travel_hrs[p][o]
+                  needed  = p.visit_hours
                   deficit = needed - remaining_capacity[o][w]
                   IF deficit > 0:
                       overcap_penalty = MAX(overcap_penalty,
-                                             PENALTY_WEIGHT * deficit)
+                                            PENALTY_WEIGHT * deficit)
 
-              score = α * load + (1 - α) * distance + overcap_penalty
+              score = α * load + (1 - α) * distance_normalized + overcap_penalty
 
               IF score < best_score:
                   best_score    = score
                   best_provider = o
 
-          // Patiënt wordt ALTIJD toegewezen (geen afwijzing mogelijk)
+          // Patiënt toewijzen en capaciteit afboeken
           FOR each week w in p.active_weeks:
-              remaining_capacity[best_provider][w] -=
-                  (p.visit_hours + travel_hrs[p][best_provider])
-              // Let op: kan negatief worden = overschrijding capaciteit
+              remaining_capacity[best_provider][w] -= p.visit_hours
+              
           assignment_map[p] = best_provider
 
   ────────────────────────────────────────────────────
   STEP 6 — Output & KPIs
   ────────────────────────────────────────────────────
   RETURN assignment_map
-  RETURN remaining_capacity   // negatieve waarden = overschrijding
+  RETURN remaining_capacity
 
   KPIs:
     - Bezettingsgraad per organisatie per week (%, kan > 100%)
@@ -156,7 +151,7 @@ class Provider:
     provider_id: str
     coords: tuple                # (latitude, longitude)
     capacity_hrs_per_week: float
-    initial_load_hrs_per_week: float = 0.0  # reeds toegewezen uren (lopende caseload)
+    initial_load_hrs_per_week: float = 0.0  # lopende caseload in uren
 
 
 # =============================================================================
@@ -242,46 +237,25 @@ def load_patients_from_csv(filepath: str) -> list:
 
     return patients
 
-
 # =============================================================================
 # HULPFUNCTIES
 # =============================================================================
 
 def haversine_km(coord1: tuple, coord2: tuple) -> float:
-    """
-    Berekent de afstand in km tussen twee GPS-coördinaten
-    via de Haversine-formule (crow-vlucht).
-    """
-    R = 6371  # straal aarde in km
+    """ Berekent de hemelsbrede afstand in kilometers. """
+    R = 6371 
     lat1, lon1 = math.radians(coord1[0]), math.radians(coord1[1])
     lat2, lon2 = math.radians(coord2[0]), math.radians(coord2[1])
 
     dlat = lat2 - lat1
     dlon = lon2 - lon1
 
-    a = math.sin(dlat / 2) ** 2 + \
-        math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
+    a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
     c = 2 * math.asin(math.sqrt(a))
-
     return R * c
 
 
-def travel_hours(coord1: tuple, coord2: tuple,
-                 avg_speed_kmh: float = 30.0) -> float:
-    """
-    Schat reistijd in uren (heen + terug) op basis van afstand.
-    Standaard gemiddelde snelheid: 30 km/u (stedelijk rijden).
-    """
-    distance = haversine_km(coord1, coord2)
-    return (distance / avg_speed_kmh) * 2  # heen + terug
-
-
 def generate_weeks(start: date, end: date) -> list:
-    """
-    Genereert een lijst van weekstartdatums (maandag)
-    van start t/m end.
-    """
-    # Ga terug naar de dichtstbijzijnde maandag
     current = start - timedelta(days=start.weekday())
     weeks = []
     while current <= end:
@@ -290,582 +264,280 @@ def generate_weeks(start: date, end: date) -> list:
     return weeks
 
 
-def active_weeks_for_patient(patient: Patient,
-                              horizon_end: date,
-                              all_weeks: list) -> list:
-    """
-    Geeft de weken terug waarin een patiënt actief is,
-    afgekapt op horizon_end.
-    """
+def active_weeks_for_patient(patient: Patient, horizon_end: date, all_weeks: list) -> list:
     effective_end = min(patient.care_end, horizon_end)
-    return [
-        w for w in all_weeks
-        if patient.discharge_date <= w < effective_end
-    ]
+    return [w for w in all_weeks if patient.discharge_date <= w < effective_end]
 
 
 # =============================================================================
 # TOEWIJZINGSMETHODES
 # =============================================================================
 
-def _book_capacity(p, best_provider, patient_active_weeks,
-                   travel_hrs, remaining_capacity,
-                   assignment_map, travel_log, processed):
-    """Boekt capaciteit en registreert toewijzing voor één patiënt."""
+def _book_capacity(p, best_provider, patient_active_weeks, distance_km, remaining_capacity, assignment_map, distance_log, processed):
+    """ Boekt patiënturen op de capaciteit en logt de afstand. """
     for w in patient_active_weeks[p.patient_id]:
         if w in remaining_capacity[best_provider.provider_id]:
-            remaining_capacity[best_provider.provider_id][w] -= (
-                p.visit_hours +
-                travel_hrs[p.patient_id][best_provider.provider_id]
-            )
+            remaining_capacity[best_provider.provider_id][w] -= p.visit_hours
+
     assignment_map[p.patient_id] = best_provider.provider_id
-    travel_log[p.patient_id] = travel_hrs[p.patient_id][best_provider.provider_id]
+    distance_log[p.patient_id] = distance_km[p.patient_id][best_provider.provider_id]
     processed.add(p.patient_id)
 
 
-def _overcapacity_penalty(p, o, patient_active_weeks,
-                           travel_hrs, remaining_capacity):
-    """
-    Berekent de overcapaciteitsboete voor patiënt p bij provider o.
-    Geeft 0.0 terug als er geen overschrijding is.
-    """
+def _overcapacity_penalty(p, o, patient_active_weeks, remaining_capacity):
     penalty = 0.0
     for w in patient_active_weeks[p.patient_id]:
         if w in remaining_capacity[o.provider_id]:
-            needed  = p.visit_hours + travel_hrs[p.patient_id][o.provider_id]
+            needed = p.visit_hours
             deficit = needed - remaining_capacity[o.provider_id][w]
             if deficit > 0:
                 penalty = max(penalty, OVERCAPACITY_PENALTY_WEIGHT * deficit)
     return penalty
 
 
-def method_greedy_heaviest_first(patients, providers, patient_active_weeks,
-                                  travel_hrs, remaining_capacity,
-                                  assignment_map, travel_log, processed,
-                                  alpha, **kwargs):
-    """
-    METHODE 1 — Zwaarste patiënt eerst + gescoorde greedy toewijzing.
-
-    Sorteert patiënten van hoog naar laag op visit_hours zodat de
-    zwaarste (moeilijkst te plaatsen) patiënten als eerste een plek
-    krijgen. Kiest per patiënt de provider met de laagste gecombineerde
-    score van bezettingsgraad (load) en reisafstand, gewogen via alpha.
-
-    Sterk in: evenwichtige spreiding bij hoge belasting.
-    """
-    patients_sorted = sorted(patients, key=lambda p: p.visit_hours,
-                             reverse=True)
+def method_greedy_heaviest_first(patients, providers, patient_active_weeks, distance_km, remaining_capacity, assignment_map, distance_log, processed, alpha, **kwargs):
+    patients_sorted = sorted(patients, key=lambda p: p.visit_hours, reverse=True)
 
     for p in patients_sorted:
         if p.patient_id in processed:
             continue
 
         best_provider = None
-        best_score    = float('inf')
-        active_w      = patient_active_weeks[p.patient_id]
+        best_score = float('inf')
+        active_w = patient_active_weeks[p.patient_id]
 
         for o in providers:
             load = max(
-                (1 - remaining_capacity[o.provider_id][w]
-                     / o.capacity_hrs_per_week)
-                for w in active_w
-                if w in remaining_capacity[o.provider_id]
+                (1 - remaining_capacity[o.provider_id][w] / o.capacity_hrs_per_week)
+                for w in active_w if w in remaining_capacity[o.provider_id]
             ) if active_w else 0.0
 
-            distance_normalized = min(
-                travel_hrs[p.patient_id][o.provider_id] / 2.0, 1.0
-            )
-            penalty = _overcapacity_penalty(
-                p, o, patient_active_weeks, travel_hrs, remaining_capacity
-            )
-            score = (alpha * load
-                     + (1 - alpha) * distance_normalized
-                     + penalty)
-
-            if score < best_score:
-                best_score    = score
-                best_provider = o
-
-        _book_capacity(p, best_provider, patient_active_weeks,
-                       travel_hrs, remaining_capacity,
-                       assignment_map, travel_log, processed)
-
-
-def method_nearest_provider(patients, providers, patient_active_weeks,
-                             travel_hrs, remaining_capacity,
-                             assignment_map, travel_log, processed, **kwargs):
-    """
-    METHODE 2 — Dichtstbijzijnde provider (puur geografisch).
-
-    Wijst elke patiënt toe aan de provider met de kortste reistijd,
-    ongeacht de huidige bezetting. Overcapaciteit wordt alleen als
-    tiebreaker meegenomen via de penalty (niet als primaire score).
-
-    Sterk in: minimale reistijden.
-    Zwak in: kan leiden tot ongelijke spreiding als patiënten geclusterd zijn.
-    """
-    # Geen volgorde-effect: volgorde van discharge_date volstaat
-    patients_sorted = sorted(patients, key=lambda p: p.discharge_date)
-
-    for p in patients_sorted:
-        if p.patient_id in processed:
-            continue
-
-        best_provider = None
-        best_score    = float('inf')
-
-        for o in providers:
-            distance = travel_hrs[p.patient_id][o.provider_id]
-            penalty  = _overcapacity_penalty(
-                p, o, patient_active_weeks, travel_hrs, remaining_capacity
-            )
-            # Primair: reisafstand. Penalty alleen als tiebreaker/afschrikking.
-            score = distance + penalty
-
-            if score < best_score:
-                best_score    = score
-                best_provider = o
-
-        _book_capacity(p, best_provider, patient_active_weeks,
-                       travel_hrs, remaining_capacity,
-                       assignment_map, travel_log, processed)
-
-
-def method_round_robin(patients, providers, patient_active_weeks,
-                       travel_hrs, remaining_capacity,
-                       assignment_map, travel_log, processed,
-                       round_robin_index, **kwargs):
-    """
-    METHODE 3 — Round-robin (strikt roterend).
-
-    Wijst patiënten beurtelings toe aan providers in vaste volgorde,
-    ongeacht load of afstand. Dient als neutrale benchmark: laat zien
-    hoeveel de slimmere methodes daadwerkelijk bijdragen.
-
-    round_robin_index is een lijst met één integer [n] zodat de teller
-    persistent is over meerdere planningsrondes (mutable default trick).
-
-    Sterk in: eenvoud en volledige gelijkheid in aantallen.
-    Zwak in: negeert zorgzwaarte, afstand én capaciteitsspreiding volledig.
-    """
-    patients_sorted = sorted(patients, key=lambda p: p.discharge_date)
-
-    for p in patients_sorted:
-        if p.patient_id in processed:
-            continue
-
-        # Kies provider op basis van roterende index
-        chosen = providers[round_robin_index[0] % len(providers)]
-        round_robin_index[0] += 1
-
-        _book_capacity(p, chosen, patient_active_weeks,
-                       travel_hrs, remaining_capacity,
-                       assignment_map, travel_log, processed)
-
-def method_edd(patients, providers, patient_active_weeks,
-               travel_hrs, remaining_capacity,
-               assignment_map, travel_log, processed, alpha=0.5, **kwargs):
-    """
-    METHODE 1 — Earliest Due Date (EDD).
-
-    Sorteert patiënten strikt op de vroegste ontslagdatum (discharge_date).
-    Patiënten die NU zorg nodig hebben, krijgen als eerste een provider toegewezen.
-    Binnen de toewijzing wordt gebalanceerd tussen load en afstand via alpha.
-
-    Sterk in: minimaliseren van deadline-overschrijdingen / logische tijdslijn.
-    Zwak in: houdt bij de patiëntvolgorde geen rekening met urgentie of reistijd.
-    """
-    # De essentie van EDD: Sorteer patiënten van vroeg naar laat op basis van ontslagdatum
-    patients_sorted = sorted(patients, key=lambda p: p.discharge_date)
-
-    for p in patients_sorted:
-        if p.patient_id in processed:
-            continue
-
-        best_provider = None
-        best_score    = float('inf')
-
-        for o in providers:
-            active_w = patient_active_weeks[p.patient_id]
+            # Normaliseer afstand fictief tot max 15km voor de scorebalans
+            distance_normalized = min(distance_km[p.patient_id][o.provider_id] / 15.0, 1.0)
+            penalty = _overcapacity_penalty(p, o, patient_active_weeks, remaining_capacity)
             
-            # Bereken load (bezettingsgraad van deze provider)
-            if active_w:
-                load = max(
-                    1 - remaining_capacity[o.provider_id][w] / o.capacity_hrs_per_week
-                    for w in active_w if w in remaining_capacity[o.provider_id]
-                )
-            else:
-                load = 0.0
-
-            distance = travel_hrs[p.patient_id][o.provider_id]
-            distance_normalized = min(distance / 2.0, 1.0)
-
-            penalty = _overcapacity_penalty(
-                p, o, patient_active_weeks, travel_hrs, remaining_capacity
-            )
-
-            # Score combineert load, afstand en de harde/zachte penalty
             score = (alpha * load) + ((1 - alpha) * distance_normalized) + penalty
 
             if score < best_score:
-                best_score    = score
+                best_score = score
                 best_provider = o
 
-        _book_capacity(p, best_provider, patient_active_weeks,
-                       travel_hrs, remaining_capacity,
-                       assignment_map, travel_log, processed)
+        _book_capacity(p, best_provider, patient_active_weeks, distance_km, remaining_capacity, assignment_map, distance_log, processed)
 
-def assign_patients(method, patients, providers, patient_active_weeks,
-                    travel_hrs, remaining_capacity, assignment_map,
-                    travel_log, processed, alpha, round_robin_index):
-    """
-    Router: roept de juiste toewijzingsmethode aan op basis van `method`.
 
-    Ondersteunde waarden voor method:
-      'greedy'      — Methode 1: zwaarste eerst + load/afstand score
-      'nearest'     — Methode 2: dichtstbijzijnde provider
-      'round_robin' — Methode 3: strikt roterend
-      'edd'         — Methode 4: Earliest Due Date (vroegste ontslagdatum eerst)
-    """
-    # Zet de input om naar kleine letters om hoofdlettergevoeligheid te voorkomen
+def method_nearest_provider(patients, providers, patient_active_weeks, distance_km, remaining_capacity, assignment_map, distance_log, processed, **kwargs):
+    patients_sorted = sorted(patients, key=lambda p: p.discharge_date)
+
+    for p in patients_sorted:
+        if p.patient_id in processed:
+            continue
+
+        best_provider = None
+        best_score = float('inf')
+
+        for o in providers:
+            distance = distance_km[p.patient_id][o.provider_id]
+            penalty = _overcapacity_penalty(p, o, patient_active_weeks, remaining_capacity)
+            score = distance + penalty
+
+            if score < best_score:
+                best_score = score
+                best_provider = o
+
+        _book_capacity(p, best_provider, patient_active_weeks, distance_km, remaining_capacity, assignment_map, distance_log, processed)
+
+
+def method_round_robin(patients, providers, patient_active_weeks, distance_km, remaining_capacity, assignment_map, distance_log, processed, round_robin_index, **kwargs):
+    patients_sorted = sorted(patients, key=lambda p: p.discharge_date)
+
+    for p in patients_sorted:
+        if p.patient_id in processed:
+            continue
+
+        chosen = providers[round_robin_index[0] % len(providers)]
+        round_robin_index[0] += 1
+
+        _book_capacity(p, chosen, patient_active_weeks, distance_km, remaining_capacity, assignment_map, distance_log, processed)
+
+
+def method_edd(patients, providers, patient_active_weeks, distance_km, remaining_capacity, assignment_map, distance_log, processed, alpha=0.5, **kwargs):
+    patients_sorted = sorted(patients, key=lambda p: p.discharge_date)
+
+    for p in patients_sorted:
+        if p.patient_id in processed:
+            continue
+
+        best_provider = None
+        best_score = float('inf')
+
+        for o in providers:
+            active_w = patient_active_weeks[p.patient_id]
+            load = max(
+                (1 - remaining_capacity[o.provider_id][w] / o.capacity_hrs_per_week)
+                for w in active_w if w in remaining_capacity[o.provider_id]
+            ) if active_w else 0.0
+
+            distance_normalized = min(distance_km[p.patient_id][o.provider_id] / 15.0, 1.0)
+            penalty = _overcapacity_penalty(p, o, patient_active_weeks, remaining_capacity)
+
+            score = (alpha * load) + ((1 - alpha) * distance_normalized) + penalty
+
+            if score < best_score:
+                best_score = score
+                best_provider = o
+
+        _book_capacity(p, best_provider, patient_active_weeks, distance_km, remaining_capacity, assignment_map, distance_log, processed)
+
+
+def assign_patients(method, patients, providers, patient_active_weeks, distance_km, remaining_capacity, assignment_map, distance_log, processed, alpha, round_robin_index):
     method_lower = method.lower()
-
     if method_lower == 'greedy':
-        method_greedy_heaviest_first(
-            patients, providers, patient_active_weeks, travel_hrs,
-            remaining_capacity, assignment_map, travel_log, processed, alpha
-        )
+        method_greedy_heaviest_first(patients, providers, patient_active_weeks, distance_km, remaining_capacity, assignment_map, distance_log, processed, alpha)
     elif method_lower == 'nearest':
-        method_nearest_provider(
-            patients, providers, patient_active_weeks, travel_hrs,
-            remaining_capacity, assignment_map, travel_log, processed
-        )
+        method_nearest_provider(patients, providers, patient_active_weeks, distance_km, remaining_capacity, assignment_map, distance_log, processed)
     elif method_lower == 'round_robin':
-        method_round_robin(
-            patients, providers, patient_active_weeks, travel_hrs,
-            remaining_capacity, assignment_map, travel_log, processed,
-            round_robin_index
-        )
+        method_round_robin(patients, providers, patient_active_weeks, distance_km, remaining_capacity, assignment_map, distance_log, processed, round_robin_index)
     elif method_lower == 'edd':
-        method_edd(
-            patients, providers, patient_active_weeks, travel_hrs,
-            remaining_capacity, assignment_map, travel_log, processed, alpha
-        )
+        method_edd(patients, providers, patient_active_weeks, distance_km, remaining_capacity, assignment_map, distance_log, processed, alpha)
     else:
-        raise ValueError(
-            f"Onbekende methode '{method}'. "
-            f"Kies uit: 'greedy', 'nearest', 'round_robin', 'edd'."
-        )
-
+        raise ValueError(f"Onbekende methode '{method}'.")
+    
 
 # =============================================================================
 # ROLLING HORIZON ALGORITME
 # =============================================================================
 
-def rolling_horizon_assignment(
-    patients: list,
-    providers: list,
-    alpha: float = 0.5,
-    lookahead_days: int = 7,
-    avg_speed_kmh: float = 30.0,
-    method: str = 'greedy'
-) -> dict:
-    """
-    Wijst patiënten toe aan thuiszorgorganisaties via een
-    rolling horizon algoritme.
-
-    Parameters:
-    -----------
-    patients      : lijst van Patient objecten
-    providers     : lijst van Provider objecten
-    alpha         : gewicht load balancing (0=alleen afstand, 1=alleen load)
-                    alleen relevant voor method='greedy'
-    lookahead_days: hoeveel dagen vooruit per planningsronde
-    avg_speed_kmh : gemiddelde rijsnelheid voor reistijdschatting
-    method        : toewijzingsmethode, kies uit:
-                      'greedy'      — zwaarste patiënt eerst + load/afstand score
-                      'nearest'     — dichtstbijzijnde provider
-                      'round_robin' — strikt roterend over providers
-
-    Returns:
-    --------
-    dict met:
-      'assignments'        : {patient_id: provider_id}
-      'remaining_capacity' : {provider_id: {week: resterende_uren}}
-      'kpis'               : dict met evaluatiemetrieken
-    """
-
-    # -------------------------------------------------------------------------
-    # Initialisatie
-    # -------------------------------------------------------------------------
-
-    # Bepaal de globale horizon over alle patiënten
+def rolling_horizon_assignment(patients: list, providers: list, alpha: float = 0.5, lookahead_days: int = 7, method: str = 'greedy') -> dict:
     all_discharge_dates = sorted(set(p.discharge_date for p in patients))
     global_horizon_start = min(p.discharge_date for p in patients)
-    global_horizon_end   = max(p.discharge_date for p in patients)
+    global_horizon_end = max(p.discharge_date for p in patients)
     all_weeks = generate_weeks(global_horizon_start, global_horizon_end)
 
-    # Capaciteitsboekhouding: remaining_capacity[provider_id][week] = uren
     remaining_capacity = {
-        o.provider_id: {
-            w: o.capacity_hrs_per_week - o.initial_load_hrs_per_week
-            for w in all_weeks
-        }
+        o.provider_id: {w: o.capacity_hrs_per_week - o.initial_load_hrs_per_week for w in all_weeks}
         for o in providers
     }
 
-    # Resultaten
-    assignment_map  = {}   # patient_id → provider_id
-    travel_log      = {}   # patient_id → reisuren naar toegewezen provider
-
-    # Persistente teller voor round-robin (lijst zodat hij muteert over rondes)
+    assignment_map = {}
+    distance_log = {}
     round_robin_index = [0]
-
-    # Bijhoud welke patiënten al verwerkt zijn
     processed = set()
 
-    # -------------------------------------------------------------------------
-    # OUTER LOOP: Rolling Horizon
-    # Elke unieke ontslagdatum is een planningsmoment
-    # -------------------------------------------------------------------------
     for t in all_discharge_dates:
-
-        # Selecteer patiënten die ontslagen worden binnen het lookahead venster
         window_end = t + timedelta(days=lookahead_days)
-        known_patients = [
-            p for p in patients
-            if t <= p.discharge_date <= window_end
-            and p.patient_id not in processed
-        ]
+        known_patients = [p for p in patients if t <= p.discharge_date <= window_end and p.patient_id not in processed]
 
         if not known_patients:
             continue
 
-        # ---------------------------------------------------------------------
-        # STEP 1: Bepaal lokale horizon voor deze planningsronde
-        # ---------------------------------------------------------------------
-        horizon_start = min(p.discharge_date for p in known_patients)
-        horizon_end   = max(p.discharge_date for p in known_patients)
-        weeks         = generate_weeks(horizon_start, horizon_end)
+        horizon_end = max(p.discharge_date for p in known_patients)
+        weeks = generate_weeks(t, horizon_end)
 
-        # ---------------------------------------------------------------------
-        # STEP 2: Bepaal actieve weken per patiënt (met afkappen)
-        # ---------------------------------------------------------------------
-        patient_active_weeks = {}
+        patient_active_weeks = {p.patient_id: active_weeks_for_patient(p, horizon_end, weeks) for p in known_patients}
+
+        distance_km = {}
         for p in known_patients:
-            patient_active_weeks[p.patient_id] = active_weeks_for_patient(
-                p, horizon_end, weeks
-            )
+            distance_km[p.patient_id] = {o.provider_id: haversine_km(p.home_coords, o.coords) for o in providers}
 
-        # ---------------------------------------------------------------------
-        # STEP 3: Bereken reistijd per patiënt-provider combinatie
-        # ---------------------------------------------------------------------
-        travel_hrs = {}
-        for p in known_patients:
-            travel_hrs[p.patient_id] = {}
-            for o in providers:
-                travel_hrs[p.patient_id][o.provider_id] = travel_hours(
-                    p.home_coords, o.coords, avg_speed_kmh
-                )
-
-        # ---------------------------------------------------------------------
-        # STEP 4 & 5: Sorteer en wijs toe op basis van gekozen methode
-        # ---------------------------------------------------------------------
         assign_patients(
-            method=method,
-            patients=known_patients,
-            providers=providers,
-            patient_active_weeks=patient_active_weeks,
-            travel_hrs=travel_hrs,
-            remaining_capacity=remaining_capacity,
-            assignment_map=assignment_map,
-            travel_log=travel_log,
-            processed=processed,
-            alpha=alpha,
-            round_robin_index=round_robin_index,
+            method=method, patients=known_patients, providers=providers,
+            patient_active_weeks=patient_active_weeks, distance_km=distance_km,
+            remaining_capacity=remaining_capacity, assignment_map=assignment_map,
+            distance_log=distance_log, processed=processed, alpha=alpha,
+            round_robin_index=round_robin_index
         )
 
-
-    # -------------------------------------------------------------------------
-    # STEP 6: Bereken KPIs
-    # -------------------------------------------------------------------------
-    kpis = compute_kpis(
-        assignment_map, remaining_capacity,
-        providers, all_weeks, travel_log, patients
-    )
-
-    return {
-        'assignments':        assignment_map,
-        'remaining_capacity': remaining_capacity,
-        'kpis':               kpis
-    }
-
+    kpis = compute_kpis(assignment_map, remaining_capacity, providers, all_weeks, distance_log)
+    return {'assignments': assignment_map, 'remaining_capacity': remaining_capacity, 'kpis': kpis}
 
 # =============================================================================
-# KPI BEREKENING
+# KPI BEREKENING & WEERGAVE
 # =============================================================================
 
-def compute_kpis(assignment_map, remaining_capacity,
-                 providers, all_weeks, travel_log, patients) -> dict:
-    """
-    Berekent evaluatiemetrieken over de volledige planning.
-    """
-    provider_map = {o.provider_id: o for o in providers}
-
-    # Bezettingsgraad per provider per week (%)
+def compute_kpis(assignment_map, remaining_capacity, providers, all_weeks, distance_log) -> dict:
     utilization = {}
     for o in providers:
         utilization[o.provider_id] = {}
         for w in all_weeks:
             if w in remaining_capacity[o.provider_id]:
-                used = (o.capacity_hrs_per_week
-                        - remaining_capacity[o.provider_id][w])
-                utilization[o.provider_id][w] = round(
-                    used / o.capacity_hrs_per_week * 100, 1
-                )
+                used = o.capacity_hrs_per_week - remaining_capacity[o.provider_id][w]
+                utilization[o.provider_id][w] = round(used / o.capacity_hrs_per_week * 100, 1)
 
-    # Gemiddelde bezettingsgraad per provider
     avg_utilization = {}
     for o in providers:
         vals = list(utilization[o.provider_id].values())
-        avg_utilization[o.provider_id] = round(
-            sum(vals) / len(vals), 1
-        ) if vals else 0.0
+        avg_utilization[o.provider_id] = round(sum(vals) / len(vals), 1) if vals else 0.0
 
-    # Gemiddelde reistijd per toewijzing (uren)
-    avg_travel = (
-        round(sum(travel_log.values()) / len(travel_log), 2)
-        if travel_log else 0.0
-    )
+    avg_distance = round(sum(distance_log.values()) / len(distance_log), 2) if distance_log else 0.0
 
-    # Spreiding in gemiddelde belasting tussen providers (std dev)
     util_values = list(avg_utilization.values())
-    mean_util   = sum(util_values) / len(util_values) if util_values else 0
-    std_util    = round(
-        math.sqrt(sum((v - mean_util) ** 2 for v in util_values)
-                  / len(util_values)), 2
-    ) if util_values else 0.0
+    mean_util = sum(util_values) / len(util_values) if util_values else 0
+    std_util = round(math.sqrt(sum((v - mean_util) ** 2 for v in util_values) / len(util_values)), 2) if util_values else 0.0
 
-    # Aantal weken met overschrijding (>100% bezetting) per provider
-    overcapacity_weeks = {}
-    for o in providers:
-        overcapacity_weeks[o.provider_id] = sum(
-            1 for v in utilization[o.provider_id].values() if v > 100
-        )
+    overcapacity_weeks = {
+        o.provider_id: sum(1 for v in utilization[o.provider_id].values() if v > 100) for o in providers
+    }
 
     return {
-        'total_assigned':        len(assignment_map),
-        'avg_travel_hrs':        avg_travel,
-        'avg_utilization_%':     avg_utilization,
+        'total_assigned': len(assignment_map),
+        'avg_distance_km': avg_distance,
+        'avg_utilization_%': avg_utilization,
         'utilization_std_dev_%': std_util,
-        'overcapacity_weeks':    overcapacity_weeks,
-        'utilization_per_week':  utilization
+        'overcapacity_weeks': overcapacity_weeks
     }
 
 
-# =============================================================================
-# RESULTATEN WEERGAVE
-# =============================================================================
-
-def print_results(result: dict, patients: list, providers: list):
-    """
-    Print een overzichtelijk rapport van de planningsresultaten.
-    """
-    print("\n" + "=" * 60)
-    print("  THUISZORG TOEWIJZING — RESULTATEN")
-    print("=" * 60)
-
-    patient_map  = {p.patient_id: p for p in patients}
-    provider_map = {o.provider_id: o for o in providers}
-
-    # Toewijzingen per provider
-    print("\n📋 TOEWIJZINGEN PER ORGANISATIE:")
-    assignments_by_provider = defaultdict(list)
-    for pid, oid in result['assignments'].items():
-        assignments_by_provider[oid].append(pid)
-
-    for oid, pids in sorted(assignments_by_provider.items()):
-        print(f"\n  {oid} ({len(pids)} patiënten):")
-        for pid in pids:
-            p = patient_map[pid]
-            print(f"    - {pid} | ontslag: {p.discharge_date} | "
-                  f"{p.visit_hours} uur/week | "
-                  f"{p.length_of_stay} dagen zorg")
-
-    # KPIs
+def print_results(method_name: str, result: dict, providers: list):
     kpis = result['kpis']
-
-    # Waarschuwing bij overschrijding van capaciteit
-    overcap = kpis['overcapacity_weeks']
-    if any(v > 0 for v in overcap.values()):
-        print(f"\n  CAPACITEITSOVERSCHRIJDING (weken > 100%):")
-        for oid, weeks in overcap.items():
-            if weeks > 0:
-                print(f"    - {oid}: {weeks} week(en)")
-
-    print("\n KPIs:")
+    
+    print("\n" + "=" * 70)
+    print(f"  STRATEGIE: {method_name.upper()}")
+    print("=" * 70)
+    
     print(f"  Totaal toegewezen       : {kpis['total_assigned']}")
-    print(f"  Gem. reistijd           : {kpis['avg_travel_hrs']} uur")
-    print(f"  Spreiding bezetting     : {kpis['utilization_std_dev_%']}%")
-
-    print("\n  Gemiddelde bezettingsgraad per organisatie:")
-    for oid, util in kpis['avg_utilization_%'].items():
-        print(f"    {oid}: {util:5.1f}%")
-
-    print("\n" + "=" * 60)
+    print(f"  Gem. reisafstand        : {kpis['avg_distance_km']:.2f} km")
+    print(f"  Spreiding bezetting     : {kpis['utilization_std_dev_%']:.2f}%")
+    print("-" * 70)
+    
+    print(f"  {'Organisatie':<20} | {'Gem. Bezetting':<18} | {'Overcap. Weken':<15}")
+    print("  " + "-" * 66)
+    
+    for o in providers:
+        oid = o.provider_id
+        avg_util = kpis['avg_utilization_%'].get(oid, 0.0)
+        overcap_w = kpis['overcapacity_weeks'].get(oid, 0)
+        
+        print(f"  {oid:<20} | {f'{avg_util:.1f}%':>18} | {f'{overcap_w} week(en)':>15}")
+        
+    print("=" * 70 + "\n")
 
 
 # =============================================================================
-# VOORBEELD / TEST
+# MAIN EXECUTION
 # =============================================================================
 
 if __name__ == "__main__":
+    import copy
 
-    # Patiënten en thuiszorgorganisaties inladen vanuit CSV
-    patients  = load_patients_from_csv("patients.csv")
-    providers = load_providers_from_csv("providers.csv")
+    try:
+        base_patients = load_patients_from_csv("patients.csv")
+        base_providers = load_providers_from_csv("providers.csv")
 
-    # -------------------------------------------------------------------------
-    # Draai alle drie methodes en vergelijk de KPIs
-    # -------------------------------------------------------------------------
-    methods = ['greedy', 'nearest', 'round_robin', 'EDD']
-    results = {}
+        methods_to_run = ['greedy', 'nearest', 'round_robin', 'edd']
 
-    for m in methods:
-        results[m] = rolling_horizon_assignment(
-            patients       = patients,
-            providers      = providers,
-            alpha          = 0.6,
-            lookahead_days = 7,
-            avg_speed_kmh  = 30.0,
-            method         = m
-        )
-
-    # -------------------------------------------------------------------------
-    # Gedetailleerd rapport voor elke methode
-    # -------------------------------------------------------------------------
-    for m in methods:
-        print(f"\n{'='*60}")
-        print(f"  METHODE: {m.upper()}")
-        print_results(results[m], patients, providers)
-
-    # -------------------------------------------------------------------------
-    # Vergelijkingstabel
-    # -------------------------------------------------------------------------
-    print("\n" + "=" * 60)
-    print("  VERGELIJKING METHODES")
-    print("=" * 60)
-    print(f"\n  {'Methode':<14} {'Gem. reistijd':>14} {'Spreiding%':>11} {'Overcap. weken':>15}")
-    print(f"  {'-'*56}")
-    for m in methods:
-        k = results[m]['kpis']
-        total_overcap = sum(k['overcapacity_weeks'].values())
-        print(f"  {m:<14} {k['avg_travel_hrs']:>12.2f}u "
-              f"{k['utilization_std_dev_%']:>10.1f}% "
-              f"{total_overcap:>14}")
-
-    print(f"\n  Toelichting kolommen:")
-    print(f"    Gem. reistijd    : lager = minder reistijd voor verpleegkundigen")
-    print(f"    Spreiding%       : lager = evenwichtigere verdeling over organisaties")
-    print(f"    Overcap. weken   : lager = minder weken met overschrijding capaciteit")
-    print()
+        for method in methods_to_run:
+            patients_copy = copy.deepcopy(base_patients)
+            providers_copy = copy.deepcopy(base_providers)
+            
+            result = rolling_horizon_assignment(
+                patients=patients_copy,
+                providers=providers_copy,
+                alpha=0.6,
+                lookahead_days=7,
+                method=method
+            )
+            
+            print_results(method, result, base_providers)
+            
+    except FileNotFoundError:
+        print("Let op: Plaats 'patients.csv' en 'providers.csv' in dezelfde map om te runnen.")
