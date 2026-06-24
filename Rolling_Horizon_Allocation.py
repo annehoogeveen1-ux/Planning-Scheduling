@@ -243,7 +243,7 @@ def load_patients_from_csv(filepath: str) -> list:
 
 def haversine_km(coord1: tuple, coord2: tuple) -> float:
     """ Berekent de hemelsbrede afstand in kilometers. """
-    R = 6371 
+    R = 6371 #radius of the earth in km
     lat1, lon1 = math.radians(coord1[0]), math.radians(coord1[1])
     lat2, lon2 = math.radians(coord2[0]), math.radians(coord2[1])
 
@@ -296,6 +296,14 @@ def _overcapacity_penalty(p, o, patient_active_weeks, remaining_capacity):
 
 
 def method_greedy_heaviest_first(patients, providers, patient_active_weeks, distance_km, remaining_capacity, assignment_map, distance_log, processed, alpha, **kwargs):
+    """
+    METHOD 1 — Most severe patient first + scored greedy assignment.
+
+    Sorts patients from high to low based on visit_hours so that the
+    most severe (hardest to place) patients get a spot first.
+    Selects the provider with the lowest combined
+    score of occupancy rate (load) and travel distance for each patient, weighted via alpha.
+    """
     patients_sorted = sorted(patients, key=lambda p: p.visit_hours, reverse=True)
 
     for p in patients_sorted:
@@ -326,6 +334,13 @@ def method_greedy_heaviest_first(patients, providers, patient_active_weeks, dist
 
 
 def method_nearest_provider(patients, providers, patient_active_weeks, distance_km, remaining_capacity, assignment_map, distance_log, processed, **kwargs):
+    """ 
+    METHOD 2 — Nearest provider (purely geographical).
+
+    Assigns each patient to the provider with the shortest distance,
+    regardless of current occupancy. Overcapacity is only taken into account as a
+    tiebreaker via the penalty (not as the primary score). 
+    """
     patients_sorted = sorted(patients, key=lambda p: p.discharge_date)
 
     for p in patients_sorted:
@@ -348,6 +363,13 @@ def method_nearest_provider(patients, providers, patient_active_weeks, distance_
 
 
 def method_round_robin(patients, providers, patient_active_weeks, distance_km, remaining_capacity, assignment_map, distance_log, processed, round_robin_index, **kwargs):
+    """
+    METHOD 3 — Round-robin (strictly rotating).
+
+    Assigns patients to providers in turn in a fixed order,
+    regardless of load or distance. Serves as a neutral benchmark: shows
+    how much the smarter methods actually contribute.
+    """
     patients_sorted = sorted(patients, key=lambda p: p.discharge_date)
 
     for p in patients_sorted:
@@ -361,6 +383,13 @@ def method_round_robin(patients, providers, patient_active_weeks, distance_km, r
 
 
 def method_edd(patients, providers, patient_active_weeks, distance_km, remaining_capacity, assignment_map, distance_log, processed, alpha=0.5, **kwargs):
+    """
+    METHOD 4 — Earliest Due Date (EDD).
+
+    Sorts patients strictly by the earliest discharge date (discharge_date).
+    Patients who need care NOW are assigned a provider first.
+    Within the assignment, load and distance are balanced via alpha.
+    """
     patients_sorted = sorted(patients, key=lambda p: p.discharge_date)
 
     for p in patients_sorted:
@@ -408,6 +437,30 @@ def assign_patients(method, patients, providers, patient_active_weeks, distance_
 # =============================================================================
 
 def rolling_horizon_assignment(patients: list, providers: list, alpha: float = 0.5, lookahead_days: int = 7, method: str = 'greedy') -> dict:
+    """
+    Assigns patients to home care organizations via a rolling horizon algorithm.
+
+    Parameters:
+    -----------
+    patients : list of Patient objects
+    providers : list of Provider objects
+    alpha : weight load balancing (0=distance only, 1=load only)
+    only relevant for method='greedy' and method='edd'
+    lookahead_days: how many days ahead per planning round
+    method : assignment method, choose from:
+
+    'greedy' — heaviest patient first + load/distance score
+    'nearest' — nearest provider
+    'round_robin' — strictly rotating across providers
+    'edd' — earliest due date
+    Returns:
+    --------
+    dict with:
+
+    'assignments' : {patient_id: provider_id}
+    'remaining_capacity' : {provider_id: {week: remaining_hours}}
+    'kpis' : dict with evaluation metrics
+    """
     all_discharge_dates = sorted(set(p.discharge_date for p in patients))
     global_horizon_start = min(p.discharge_date for p in patients)
     global_horizon_end = max(p.discharge_date for p in patients)
