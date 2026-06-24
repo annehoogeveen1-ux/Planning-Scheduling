@@ -33,7 +33,7 @@ from Config import location_centre
 
 # Planningshorizon voor ontslagdatums
 HORIZON_START_DATE = date(2026, 1, 1)
-HORIZON_LENGTH_DAYS = 30          # patiënten worden ontslagen binnen dit venster
+HORIZON_LENGTH_DAYS = 365          # patiënten worden ontslagen binnen dit venster
 
 # Lengte van het thuiszorgtraject (in dagen), uniform tussen min en max
 LENGTH_OF_STAY_MIN_DAYS = 14
@@ -58,10 +58,10 @@ patient_counter = 0
 
 
 # -----------------------------
-# Location generator (ongewijzigd)
+# Location generator 
 # -----------------------------
 def generate_patient_location():
-    radius_km = 50
+    radius_km = 15
     distance = random.uniform(0, radius_km)
     bearing = random.uniform(0, 360)
 
