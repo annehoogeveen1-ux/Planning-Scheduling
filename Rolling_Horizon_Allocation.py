@@ -270,6 +270,41 @@ def active_weeks_for_patient(patient: Patient, horizon_end: date, all_weeks: lis
 
 
 # =============================================================================
+# TRAVEL TIME CALCULATION
+# =============================================================================
+
+# Average driving speed for home care in urban/rural areas (km/h).
+# Literature values range between 25–40 km/h; 30 is a common choice.
+TRAVEL_SPEED_KMH = 30.0
+
+# Maximum travel time (hours) used for normalisation to [0, 1].
+# 1 hour = a realistic hard ceiling for home care trips in the Netherlands.
+MAX_TRAVEL_HOURS = 1.0
+
+
+def travel_hours(distance_km: float, speed_kmh: float = TRAVEL_SPEED_KMH) -> float:
+    """
+    Converts straight-line distance to estimated travel time in hours.
+
+    Uses a fixed average speed as a proxy for driving time.
+    Straight-line distance underestimates road distance — a detour
+    factor of ~1.3 (standard for the Netherlands) is applied internally.
+
+    Parameters:
+    -----------
+    distance_km : float — straight-line distance in km
+    speed_kmh   : float — average driving speed in km/h (default 30)
+
+    Returns:
+    --------
+    float — estimated travel time in hours
+    """
+    DETOUR_FACTOR = 1.3  #straight-line → actual road distance
+    road_distance_km = distance_km * DETOUR_FACTOR
+    return road_distance_km / speed_kmh
+
+
+# =============================================================================
 # TOEWIJZINGSMETHODES
 # =============================================================================
 
@@ -280,7 +315,7 @@ def _book_capacity(p, best_provider, patient_active_weeks, distance_km, remainin
             remaining_capacity[best_provider.provider_id][w] -= p.visit_hours
 
     assignment_map[p.patient_id] = best_provider.provider_id
-    distance_log[p.patient_id] = distance_km[p.patient_id][best_provider.provider_id]
+    distance_log[p.patient_id] = travel_hours(distance_km[p.patient_id][best_provider.provider_id])
     processed.add(p.patient_id)
 
 
@@ -321,7 +356,8 @@ def method_greedy_heaviest_first(patients, providers, patient_active_weeks, dist
             ) if active_w else 0.0
 
             # Normaliseer afstand fictief tot max 15km voor de scorebalans
-            distance_normalized = min(distance_km[p.patient_id][o.provider_id] / 15.0, 1.0)
+            t_hours = travel_hours(distance_km[p.patient_id][o.provider_id])
+            distance_normalized = min(t_hours / MAX_TRAVEL_HOURS, 1.0)
             penalty = _overcapacity_penalty(p, o, patient_active_weeks, remaining_capacity)
             
             score = (alpha * load) + ((1 - alpha) * distance_normalized) + penalty
@@ -406,7 +442,8 @@ def method_edd(patients, providers, patient_active_weeks, distance_km, remaining
                 for w in active_w if w in remaining_capacity[o.provider_id]
             ) if active_w else 0.0
 
-            distance_normalized = min(distance_km[p.patient_id][o.provider_id] / 15.0, 1.0)
+            t_hours = travel_hours(distance_km[p.patient_id][o.provider_id])
+            distance_normalized = min(t_hours / MAX_TRAVEL_HOURS, 1.0)
             penalty = _overcapacity_penalty(p, o, patient_active_weeks, remaining_capacity)
 
             score = (alpha * load) + ((1 - alpha) * distance_normalized) + penalty
@@ -533,7 +570,7 @@ def compute_kpis(assignment_map, remaining_capacity, providers, all_weeks, dista
 
     return {
         'total_assigned': len(assignment_map),
-        'avg_distance_km': avg_distance,
+        'avg_travel_hours': avg_distance,
         'avg_utilization_%': avg_utilization,
         'utilization_std_dev_%': std_util,
         'overcapacity_weeks': overcapacity_weeks
@@ -548,7 +585,7 @@ def print_results(method_name: str, result: dict, providers: list):
     print("=" * 70)
     
     print(f"  Totaal toegewezen       : {kpis['total_assigned']}")
-    print(f"  Gem. reisafstand        : {kpis['avg_distance_km']:.2f} km")
+    print(f"  Avg. travel time        : {kpis['avg_travel_hours']:.2f} hrs")
     print(f"  Spreiding bezetting     : {kpis['utilization_std_dev_%']:.2f}%")
     print("-" * 70)
     

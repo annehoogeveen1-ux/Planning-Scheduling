@@ -71,7 +71,7 @@ for method in METHODS:
                 "lookahead_days": STANDARD_LOOKAHEAD_DAYS,
                 "penalty": penalty,
                 "total_assigned": kpi["total_assigned"],
-                "avg_distance_km": kpi["avg_distance_km"],
+                "avg_travel_hours": kpi["avg_travel_hours"],  
                 "util_std_dev": kpi["utilization_std_dev_%"],
                 "overcap_weeks_total": sum(kpi["overcapacity_weeks"].values())
             }
@@ -95,7 +95,7 @@ df.to_excel(os.path.join(OUTPUT_DIR, "Sensitivity_Analysis_Full.xlsx"), index=Fa
 df.to_csv(os.path.join(OUTPUT_DIR, "Sensitivity_Analysis_Full.csv"), index=False)
 
 top10 = df.sort_values(
-    by=["util_std_dev", "avg_distance_km", "total_assigned"],
+    by=["util_std_dev", "avg_travel_hours", "total_assigned"],
     ascending=[True, True, False]
 ).head(10)
 
@@ -103,8 +103,8 @@ top10.to_excel(os.path.join(OUTPUT_DIR, "Top10_Configurations.xlsx"), index=Fals
 
 best_per_method = (
     df.sort_values(
-        by=["method", "util_std_dev", "avg_distance_km", "total_assigned"],
-        ascending=[True, True, True, False]
+    by=["method", "util_std_dev", "avg_travel_hours", "total_assigned"],
+    ascending=[True, True, True, False]
     )
     .groupby("method")
     .head(1)
@@ -117,7 +117,7 @@ summary_by_method = (
     df.groupby("method")
     .agg({
         "util_std_dev": ["mean", "min", "max"],
-        "avg_distance_km": ["mean", "min", "max"],
+        "avg_travel_hours": ["mean", "min", "max"],
         "overcap_weeks_total": ["mean", "min", "max"],
         "total_assigned": ["mean", "min", "max"]
     })
@@ -136,7 +136,7 @@ alpha_effect = (
     .groupby(["method", "alpha"])
     .agg({
         "util_std_dev": "mean",
-        "avg_distance_km": "mean",
+        "avg_travel_hours": "mean",
         "overcap_weeks_total": "mean"
     })
     .reset_index()
@@ -147,7 +147,7 @@ penalty_effect = (
     df.groupby(["method", "penalty"])
     .agg({
         "util_std_dev": "mean",
-        "avg_distance_km": "mean",
+        "avg_travel_hours": "mean",
         "overcap_weeks_total": "mean"
     })
     .reset_index()
