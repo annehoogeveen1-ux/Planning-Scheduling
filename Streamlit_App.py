@@ -362,7 +362,7 @@ st.sidebar.header("🛠️ Dashboard Settings")
 
 # Navigation
 st.sidebar.subheader("Navigation")
-page = st.sidebar.radio("Go to Page", ["📈 Metrics Dashboard", "🗺️ Geographic Map"])
+page = st.sidebar.radio("Go to Page", ["Metrics Dashboard", "Geographic Map"])
 
 try:
     base_patient_df = load_patient_df(DEFAULT_PATIENTS_FILE)
@@ -372,7 +372,7 @@ except Exception as e:
     st.stop()
 
 # Allocation parameters
-st.sidebar.subheader("⚙️ Allocation Parameters")
+st.sidebar.subheader("Allocation Parameters")
 lookahead_days = st.sidebar.slider(
     "Planning Horizon (Days)",
     min_value=1,
@@ -401,7 +401,7 @@ alpha = st.sidebar.slider(
 )
 
 # Initial workload profile settings
-st.sidebar.subheader("📈 Initial Workload Scenario")
+st.sidebar.subheader("Initial Workload Scenario")
 provider_ids = sorted(base_provider_df["provider_id"].tolist())
 
 # Generate load profiles based on loaded provider IDs
@@ -457,11 +457,11 @@ patient_df = base_patient_df.copy()
 # ==========================================
 # PAGE 1: Metrics Dashboard
 # ==========================================
-if page == "📈 Metrics Dashboard":
+if page == "Metrics Dashboard":
 
     tab1, tab2 = st.tabs([
-        "📊 Strategy Comparison",
-        "📈 Detailed Inspection"
+        "Strategy Comparison",
+        "Detailed Inspection"
     ])
 
     # Date range boundary for charts
@@ -522,11 +522,11 @@ if page == "📈 Metrics Dashboard":
             
         kpi_df = pd.DataFrame(kpi_table_data)
         
-        st.markdown("### 📋 Performance Metrics (KPIs)")
+        st.markdown("### Performance Metrics (KPIs)")
         st.dataframe(kpi_df, width="stretch", hide_index=True)
         
         # Graphs for visual comparison
-        st.markdown("### 📊 Visual Comparison")
+        st.markdown("### Visual Comparison")
         col1, col2 = st.columns(2)
         
         # Extract data for plotting
@@ -696,8 +696,8 @@ if page == "📈 Metrics Dashboard":
 # ==========================================
 # PAGE 2: Geographic Map
 # ==========================================
-elif page == "🗺️ Geographic Map":
-    st.subheader("🗺️ Geographic Map Visualization")
+elif page == "Geographic Map":
+    st.subheader("Geographic Map Visualization")
     st.markdown(
         "This map visualizes the geographical locations of the **Care Providers** "
         "and shows a **Heatmap** representing the density of **Patients** "
