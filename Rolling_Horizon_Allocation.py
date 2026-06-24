@@ -7,21 +7,13 @@ from dataclasses import dataclass, field
 from collections import defaultdict
 from typing import Optional
 
-
-
-
 # =============================================================================
 # CONSTANTS
 # =============================================================================
 
-# Weight for the overcapacity penalty in the score function.
-# Chosen high enough so that an assignment without violation
-# ALWAYS takes precedence over an assignment with violation,
-# regardless of load/distance differences (which lie in the range [0,1]).
 OVERCAPACITY_PENALTY_WEIGHT = 10.0
 TRAVEL_SPEED_KMH = 30.0
 MAX_TRAVEL_HOURS = 1.0
-
 
 # =============================================================================
 # DATA CLASSES
@@ -48,19 +40,11 @@ class Provider:
     capacity_hrs_per_week: float
     initial_load_hrs_per_week: float = 0.0  # current caseload in hours
 
-
 # =============================================================================
 # CSV LOADING
 # =============================================================================
 
 def load_providers_from_csv(filepath: str) -> list:
-    """
-    Loads home care organizations from a CSV file.
-
-    Expected format:
-        provider_id,latitude,longitude,capacity_hrs_per_week,initial_load_hrs_per_week
-        ThuiszorgA,52.21,6.89,80.0,55.0
-    """
     df = pd.read_csv(filepath, dtype={'provider_id': str})
 
     required_cols = {'provider_id', 'latitude', 'longitude', 'capacity_hrs_per_week'}
@@ -78,18 +62,9 @@ def load_providers_from_csv(filepath: str) -> list:
             capacity_hrs_per_week=float(row['capacity_hrs_per_week']),
             initial_load_hrs_per_week=float(row['initial_load_hrs_per_week']) if has_initial_load else 0.0
         ))
-
     return providers
 
-
 def load_patients_from_csv(filepath: str) -> list:
-    """
-    Loads patients from a CSV file.
-
-    Expected format:
-        patient_id,discharge_date,length_of_stay,visit_hours,latitude,longitude
-        P0001,2024-01-03,28,4,52.30,5.76
-    """
     df = pd.read_csv(filepath, dtype={'patient_id': str}, parse_dates=['discharge_date'])
 
     required_cols = {'patient_id', 'discharge_date', 'length_of_stay', 'visit_hours', 'latitude', 'longitude'}
@@ -106,7 +81,6 @@ def load_patients_from_csv(filepath: str) -> list:
             visit_hours=float(row['visit_hours']),
             home_coords=(float(row['latitude']), float(row['longitude']))
         ))
-
     return patients
 
 # =============================================================================
@@ -114,7 +88,6 @@ def load_patients_from_csv(filepath: str) -> list:
 # =============================================================================
 
 def haversine_km(coord1: tuple, coord2: tuple) -> float:
-    """ Calculates the great-circle distance in kilometers. """
     R = 6371 
     lat1, lon1 = math.radians(coord1[0]), math.radians(coord1[1])
     lat2, lon2 = math.radians(coord2[0]), math.radians(coord2[1])
@@ -126,7 +99,6 @@ def haversine_km(coord1: tuple, coord2: tuple) -> float:
     c = 2 * math.asin(math.sqrt(a))
     return R * c
 
-
 def generate_weeks(start: date, end: date) -> list:
     current = start - timedelta(days=start.weekday())
     weeks = []
@@ -134,7 +106,6 @@ def generate_weeks(start: date, end: date) -> list:
         weeks.append(current)
         current += timedelta(weeks=1)
     return weeks
-
 
 def active_weeks_for_patient(patient: Patient, horizon_end: date, all_weeks: list) -> list:
     effective_end = min(patient.care_end, horizon_end)
@@ -152,7 +123,6 @@ def travel_hours(distance_km: float, speed_kmh: float = TRAVEL_SPEED_KMH) -> flo
     road_distance_km = distance_km * DETOUR_FACTOR
     return road_distance_km / speed_kmh
 
-
 # =============================================================================
 # ASSIGNMENT METHODS
 # =============================================================================
@@ -166,7 +136,6 @@ def _book_capacity(p, best_provider, patient_active_weeks, distance_km, remainin
     distance_log[p.patient_id] = travel_hours(distance_km[p.patient_id][best_provider.provider_id])
     processed.add(p.patient_id)
 
-
 def _overcapacity_penalty(p, o, patient_active_weeks, remaining_capacity):
     penalty = 0.0
     for w in patient_active_weeks[p.patient_id]:
@@ -176,7 +145,6 @@ def _overcapacity_penalty(p, o, patient_active_weeks, remaining_capacity):
             if deficit > 0:
                 penalty = max(penalty, deficit)
     return penalty
-
 
 def method_greedy_heaviest_first(patients, providers, patient_active_weeks, distance_km, remaining_capacity, assignment_map, distance_log, processed, alpha, **kwargs):
     patients_sorted = sorted(patients, key=lambda p: p.visit_hours, reverse=True)
@@ -207,7 +175,6 @@ def method_greedy_heaviest_first(patients, providers, patient_active_weeks, dist
 
         _book_capacity(p, best_provider, patient_active_weeks, distance_km, remaining_capacity, assignment_map, distance_log, processed)
 
-
 def method_nearest_provider(patients, providers, patient_active_weeks, distance_km, remaining_capacity, assignment_map, distance_log, processed, **kwargs):
     patients_sorted = sorted(patients, key=lambda p: p.discharge_date)
 
@@ -229,7 +196,6 @@ def method_nearest_provider(patients, providers, patient_active_weeks, distance_
 
         _book_capacity(p, best_provider, patient_active_weeks, distance_km, remaining_capacity, assignment_map, distance_log, processed)
 
-
 def method_round_robin(patients, providers, patient_active_weeks, distance_km, remaining_capacity, assignment_map, distance_log, processed, round_robin_index, **kwargs):
     patients_sorted = sorted(patients, key=lambda p: p.discharge_date)
 
@@ -241,7 +207,6 @@ def method_round_robin(patients, providers, patient_active_weeks, distance_km, r
         round_robin_index[0] += 1
 
         _book_capacity(p, chosen, patient_active_weeks, distance_km, remaining_capacity, assignment_map, distance_log, processed)
-
 
 def method_edd(patients, providers, patient_active_weeks, distance_km, remaining_capacity, assignment_map, distance_log, processed, alpha=0.5, **kwargs):
     patients_sorted = sorted(patients, key=lambda p: p.discharge_date)
@@ -272,7 +237,6 @@ def method_edd(patients, providers, patient_active_weeks, distance_km, remaining
 
         _book_capacity(p, best_provider, patient_active_weeks, distance_km, remaining_capacity, assignment_map, distance_log, processed)
 
-
 def assign_patients(method, patients, providers, patient_active_weeks, distance_km, remaining_capacity, assignment_map, distance_log, processed, alpha, round_robin_index):
     method_lower = method.lower()
     if method_lower == 'greedy':
@@ -286,7 +250,6 @@ def assign_patients(method, patients, providers, patient_active_weeks, distance_
     else:
         raise ValueError(f"Unknown method '{method}'.")
     
-
 # =============================================================================
 # ROLLING HORIZON ALGORITHM
 # =============================================================================
@@ -294,7 +257,7 @@ def assign_patients(method, patients, providers, patient_active_weeks, distance_
 def rolling_horizon_assignment(patients: list, providers: list, alpha: float = 0.5, lookahead_days: int = 7, method: str = 'greedy') -> dict:
     all_discharge_dates = sorted(set(p.discharge_date for p in patients))
     global_horizon_start = min(p.discharge_date for p in patients)
-    global_horizon_end = max(p.discharge_date for p in patients)
+    global_horizon_end = max(p.care_end for p in patients)
     all_weeks = generate_weeks(global_horizon_start, global_horizon_end)
 
     remaining_capacity = {
@@ -314,7 +277,7 @@ def rolling_horizon_assignment(patients: list, providers: list, alpha: float = 0
         if not known_patients:
             continue
 
-        horizon_end = max(p.discharge_date for p in known_patients)
+        horizon_end = global_horizon_end # if window_end > global_horizon_end else window_end
         patient_active_weeks = {p.patient_id: active_weeks_for_patient(p, horizon_end, all_weeks) for p in known_patients}
 
         distance_km = {}
@@ -331,7 +294,6 @@ def rolling_horizon_assignment(patients: list, providers: list, alpha: float = 0
 
     kpis = compute_kpis(assignment_map, remaining_capacity, providers, all_weeks, distance_log)
     return {'assignments': assignment_map, 'remaining_capacity': remaining_capacity, 'kpis': kpis}
-
 
 # =============================================================================
 # KPI CALCULATION & DISPLAY
@@ -366,9 +328,9 @@ def compute_kpis(assignment_map, remaining_capacity, providers, all_weeks, dista
         'avg_travel_hours': avg_distance,
         'avg_utilization_%': avg_utilization,
         'utilization_std_dev_%': std_util,
-        'overcapacity_weeks': overcapacity_weeks
+        'overcapacity_weeks': overcapacity_weeks,
+        'weekly_utilization': utilization # Outputted map of raw data for graphing
     }
-
 
 def print_results(method_name: str, result: dict, providers: list):
     kpis = result['kpis']
