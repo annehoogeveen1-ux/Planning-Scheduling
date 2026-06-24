@@ -309,9 +309,13 @@ def compute_kpis(assignment_map, remaining_capacity, providers, all_weeks, dista
                 used = o.capacity_hrs_per_week - remaining_capacity[o.provider_id][w]
                 utilization[o.provider_id][w] = round(used / o.capacity_hrs_per_week * 100, 1)
 
+    # Filter weeks for KPI calculations to the first 365 days (T = 365 planning horizon)
+    horizon_start = min(all_weeks)
+    kpi_weeks = [w for w in all_weeks if (w - horizon_start).days < 365]
+
     avg_utilization = {}
     for o in providers:
-        vals = list(utilization[o.provider_id].values())
+        vals = [utilization[o.provider_id][w] for w in kpi_weeks if w in utilization[o.provider_id]]
         avg_utilization[o.provider_id] = round(sum(vals) / len(vals), 1) if vals else 0.0
 
     avg_distance = round(sum(distance_log.values()) / len(distance_log), 2) if distance_log else 0.0
@@ -321,7 +325,7 @@ def compute_kpis(assignment_map, remaining_capacity, providers, all_weeks, dista
     std_util = round(math.sqrt(sum((v - mean_util) ** 2 for v in util_values) / len(util_values)), 2) if util_values else 0.0
 
     overcapacity_weeks = {
-        o.provider_id: sum(1 for v in utilization[o.provider_id].values() if v > 100) for o in providers
+        o.provider_id: sum(1 for w in kpi_weeks if w in utilization[o.provider_id] and utilization[o.provider_id][w] > 100) for o in providers
     }
 
     return {

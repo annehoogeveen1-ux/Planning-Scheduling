@@ -77,7 +77,7 @@ def run_assignment(patients, providers, method, scenario_name):
         "lookahead_days": LOOKAHEAD_DAYS,
         "penalty": PENALTY,
         "total_assigned": kpi["total_assigned"],
-        "avg_distance_km": kpi["avg_distance_km"],
+        "avg_distance_km": round(kpi.get("avg_travel_hours", 0.0) * 30.0 / 1.3, 2),
         "util_std_dev": kpi["utilization_std_dev_%"],
         "overcap_weeks_total": sum(kpi["overcapacity_weeks"].values()),
     }
