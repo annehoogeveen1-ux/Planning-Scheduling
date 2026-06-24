@@ -418,7 +418,7 @@ if __name__ == "__main__":
                 method=method
             )
             
-            print_results(method, result, base_providers)
+            print_results(method, result, providers_copy)
             
     except FileNotFoundError:
         print("Notice: Please place 'patients.csv' and 'providers.csv' in the same directory to run.")
