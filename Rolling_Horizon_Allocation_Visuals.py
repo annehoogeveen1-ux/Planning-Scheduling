@@ -257,7 +257,7 @@ def assign_patients(method, patients, providers, patient_active_weeks, distance_
 def rolling_horizon_assignment(patients: list, providers: list, alpha: float = 0.5, lookahead_days: int = 7, method: str = 'greedy') -> dict:
     all_discharge_dates = sorted(set(p.discharge_date for p in patients))
     global_horizon_start = min(p.discharge_date for p in patients)
-    global_horizon_end = max(p.discharge_date for p in patients)
+    global_horizon_end = max(p.care_end for p in patients)
     all_weeks = generate_weeks(global_horizon_start, global_horizon_end)
 
     remaining_capacity = {
@@ -277,7 +277,7 @@ def rolling_horizon_assignment(patients: list, providers: list, alpha: float = 0
         if not known_patients:
             continue
 
-        horizon_end = max(p.discharge_date for p in known_patients)
+        horizon_end = global_horizon_end # if window_end > global_horizon_end else window_end
         patient_active_weeks = {p.patient_id: active_weeks_for_patient(p, horizon_end, all_weeks) for p in known_patients}
 
         distance_km = {}

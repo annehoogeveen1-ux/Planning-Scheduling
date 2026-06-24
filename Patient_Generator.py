@@ -86,7 +86,6 @@ def generate_discharge_date():
     offset_days = random.randint(0, HORIZON_LENGTH_DAYS - 1)
     return HORIZON_START_DATE + timedelta(days=offset_days)
 
-
 # -----------------------------
 # Verblijfsduur generator (nieuw)
 # -----------------------------
@@ -163,9 +162,24 @@ def generate_dataset(n=500):
 
 if __name__ == "__main__":
     n_patients = 500
+    
+    # --- ADD THE RANDOM SEEDS HERE ---
+    # You can pick any number you like (e.g., 42 is a classic choice in programming)
+    random.seed(42)
+    np.random.seed(42)
+    # ---------------------------------
 
     df = generate_dataset(n=n_patients)
+    
+    # Sorteer op ontslagdatum, zoals het algoritme verwacht
+    df = df.sort_values("discharge_date").reset_index(drop=True)
+    
     df.to_csv("patients.csv", index=False)
 
     print(f"{n_patients} patiënten gegenereerd en opgeslagen in patients.csv")
     print(df.head())
+    
+    # Bewijs dat het hele jaar gedekt is:
+    print("\n--- CONTROLE ---")
+    print(f"Vroegste datum : {df['discharge_date'].min()}")
+    print(f"Laatste datum  : {df['discharge_date'].max()}")
