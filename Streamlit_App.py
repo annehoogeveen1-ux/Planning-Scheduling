@@ -626,41 +626,63 @@ if page == "Metrics Dashboard":
         kpis = res_data["kpis"]
         
         # Metric cards display
-        kpi_cols = st.columns(5)
+        kpi_cols = st.columns(4)
         
         with kpi_cols[0]:
             st.metric("Total Patients", f"{kpis['total_patients']}")
         
         with kpi_cols[1]:
-            st.metric("Assigned", f"{kpis['total_assigned']} ({kpis['total_assigned'] / kpis['total_patients'] * 100:.1f}%)")
-        
-        with kpi_cols[2]:
             st.metric("Peak Occupancy", format_pct(kpis["peak_occupancy_pct"]))
         
-        with kpi_cols[3]:
-            st.metric("Avg. Occupancy", format_pct(kpis["avg_occupancy_pct"]))
+        with kpi_cols[2]:
+            st.metric("Workload Imbalance (Std Dev)", format_pct(kpis["balance_std_pct"]))
         
-        with kpi_cols[4]:
+        with kpi_cols[3]:
             st.metric("Avg. Travel Distance", f"{format_num(kpis['avg_travel_km'])} km")
             
         st.markdown("---")
-        mid_cols = st.columns(2)
+        st.subheader("Patient Distribution per Provider (Active Patients per Week)")
         
-        with mid_cols[0]:
-            st.subheader("Patient Distribution per Provider (Active Patients per Week)")
-            st.plotly_chart(
-                build_distribution_chart(activity_df, min_discharge_date, max_discharge_date),
-                width="stretch",
-                config={"displayModeBar": False},
-            )
+        # Build per-provider distribution charts with a shared Y-axis max
+        dist_plot_df = (
+            activity_df
+            .groupby(["week_start", "assigned_provider"], as_index=False)["patients"]
+            .sum()
+            .sort_values("week_start")
+        )
+        y_max = dist_plot_df["patients"].max() * 1.15 if not dist_plot_df.empty else 10
         
-        with mid_cols[1]:
-            st.subheader("Weekly Occupancy Rate per Provider (%)")
-            st.plotly_chart(
-                build_occupancy_chart(utilization_df, min_discharge_date, max_discharge_date),
-                width="stretch",
-                config={"displayModeBar": False},
+        dist_providers = sorted(activity_df["assigned_provider"].dropna().unique()) if not activity_df.empty else provider_ids
+        dist_cols = st.columns(len(dist_providers))
+        
+        for i, pid in enumerate(dist_providers):
+            pid_df = dist_plot_df[dist_plot_df["assigned_provider"] == pid]
+            fig_pid = px.bar(
+                pid_df,
+                x="week_start",
+                y="patients",
+                height=350,
+                labels={"week_start": "Week", "patients": "Patients"},
+                title=pid,
             )
+            fig_pid.update_layout(
+                margin=dict(l=10, r=10, t=40, b=10),
+                showlegend=False,
+                xaxis_title="",
+                yaxis_title="Patients" if i == 0 else "",
+                yaxis=dict(range=[0, y_max]),
+            )
+            if pd.notna(min_discharge_date) and pd.notna(max_discharge_date):
+                fig_pid.update_xaxes(range=[min_discharge_date, max_discharge_date])
+            with dist_cols[i]:
+                st.plotly_chart(fig_pid, width="stretch", config={"displayModeBar": False})
+        
+        st.subheader("Weekly Occupancy Rate per Provider (%)")
+        st.plotly_chart(
+            build_occupancy_chart(utilization_df, min_discharge_date, max_discharge_date),
+            width="stretch",
+            config={"displayModeBar": False},
+        )
         
         st.subheader("Total Assigned Patients per Provider")
         st.plotly_chart(
@@ -668,6 +690,7 @@ if page == "Metrics Dashboard":
             width="stretch",
             config={"displayModeBar": False},
         )
+
         
         # Full assignment list table
         with st.expander("Assignment Table (Full Patient List)"):

@@ -217,7 +217,7 @@ plot_bar_by_scenario(
 plot_bar_by_scenario(
     summary_by_scenario,
     y_col="overcap_weeks_total",
-    ylabel="Total overcapacity weeks",
+    ylabel="Total times overcapacity across HCOs (measured per week)",
     title="Effect of unequal initial load on overcapacity",
     filename="Unequal_Load_Overcapacity.png",
 )
