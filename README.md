@@ -4,7 +4,7 @@ Install necessary requirements:
 
 pip install geopy 
 pip install streamlit
-
+pip install pydeck
 
 
 Patient_Generator.py generates the patients and saves this in patients.csv

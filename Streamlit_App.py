@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sys
 import subprocess
+import pydeck as pdk
 
 # Dwing het script om direct via Streamlit te herstarten ALS het met de Play-knop is opgestart
 if "streamlit" not in sys.modules and "-m" not in sys.argv:
@@ -22,7 +23,6 @@ if "streamlit" not in sys.modules and "-m" not in sys.argv:
 from pathlib import Path
 from datetime import timedelta
 
-import numpy as np
 import pandas as pd
 import plotly.express as px
 import streamlit as st
@@ -40,10 +40,6 @@ from Rolling_Horizon_Allocation import (  # gebruikt jullie bestaande code
     OVERCAPACITY_PENALTY_WEIGHT,
 )
 
-try:
-    from Patient_Generator import generate_dataset as generate_patient_dataset
-except Exception:
-    generate_patient_dataset = None
 
 
 # =========================
@@ -91,49 +87,6 @@ def load_provider_df(path: Path) -> pd.DataFrame:
     if "initial_load_hrs_per_week" not in df.columns:
         df["initial_load_hrs_per_week"] = 0.0
     return df
-
-
-@st.cache_data(show_spinner=False)
-def build_dummy_patients(n_patients: int) -> pd.DataFrame:
-    if generate_patient_dataset is not None:
-        df = generate_patient_dataset(n=n_patients).copy()
-        df["discharge_date"] = pd.to_datetime(df["discharge_date"])
-        if "type_care" not in df.columns:
-            df["type_care"] = "Onbekend"
-        return df
-
-    rng = np.random.default_rng(42)
-    base_date = pd.Timestamp("2026-01-01")
-    centre_lat, centre_lon = 52.5137, 6.1237
-
-    df = pd.DataFrame(
-        {
-            "patient_id": [f"P{i:04d}" for i in range(1, n_patients + 1)],
-            "discharge_date": base_date + pd.to_timedelta(rng.integers(0, 30, n_patients), unit="D"),
-            "length_of_stay": rng.integers(14, 42, n_patients),
-            "visit_hours": rng.choice([2, 3, 4, 5, 6], size=n_patients, p=[0.10, 0.20, 0.35, 0.25, 0.10]),
-            "latitude": centre_lat + rng.normal(0, 0.18, n_patients),
-            "longitude": centre_lon + rng.normal(0, 0.20, n_patients),
-            "type_care": rng.choice(["chirurgie", "cardiologie", "urologie", "revalidatie"], size=n_patients),
-        }
-    )
-    return df
-
-
-@st.cache_data(show_spinner=False)
-def build_dummy_providers() -> pd.DataFrame:
-    if DEFAULT_PROVIDERS_FILE.exists():
-        return load_provider_df(DEFAULT_PROVIDERS_FILE)
-
-    return pd.DataFrame(
-        {
-            "provider_id": ["HomecareA", "HomecareB", "HomecareC"],
-            "latitude": [52.27818, 52.52965, 52.17182],
-            "longitude": [5.97271, 5.91715, 5.74478],
-            "capacity_hrs_per_week": [80, 80, 80],
-            "initial_load_hrs_per_week": [55, 40, 60],
-        }
-    )
 
 
 def dataframe_to_objects(patient_df: pd.DataFrame, provider_df: pd.DataFrame) -> tuple[list[Patient], list[Provider]]:
@@ -433,8 +386,8 @@ def format_num(value: float) -> str:
     return f"{value:,.1f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
-def build_distribution_chart(activity_df: pd.DataFrame, split_by: str):
-    group_col = "assigned_provider" if split_by == "Homecare" else "type_care"
+def build_distribution_chart(activity_df: pd.DataFrame, min_date, max_date):
+    group_col = "assigned_provider"
     plot_df = (
         activity_df.groupby(["week_start", group_col], as_index=False)["patients"].sum().sort_values("week_start")
     )
@@ -452,10 +405,11 @@ def build_distribution_chart(activity_df: pd.DataFrame, split_by: str):
         xaxis_title="",
         yaxis_title="",
     )
+    fig.update_xaxes(range=[min_date, max_date])
     return fig
 
 
-def build_occupancy_chart(utilization_df: pd.DataFrame):
+def build_occupancy_chart(utilization_df: pd.DataFrame, min_date, max_date):
     fig = px.line(
         utilization_df,
         x="week_start",
@@ -471,6 +425,7 @@ def build_occupancy_chart(utilization_df: pd.DataFrame):
         xaxis_title="",
         yaxis_title="",
     )
+    fig.update_xaxes(range=[min_date, max_date])
     return fig
 
 
@@ -500,25 +455,32 @@ def build_assignment_chart(assignment_df: pd.DataFrame, provider_df: pd.DataFram
 # Pagina
 # =========================
 
-real_data_available = DEFAULT_PATIENTS_FILE.exists() and DEFAULT_PROVIDERS_FILE.exists()
-
 st.title("Isala Tactical Dashboard")
 
-control_cols = st.columns([1.1, 1.4, 0.8, 0.9, 0.9, 0.9, 0.9, 1.0])
+if not DEFAULT_PATIENTS_FILE.exists():
+    st.error(f"patients.csv niet gevonden in: {PROJECT_DIR}")
+    st.stop()
+
+if not DEFAULT_PROVIDERS_FILE.exists():
+    st.error(f"providers.csv niet gevonden in: {PROJECT_DIR}")
+    st.stop()
+
+patient_df = load_patient_df(DEFAULT_PATIENTS_FILE)
+provider_df = load_provider_df(DEFAULT_PROVIDERS_FILE)
+
+control_cols = st.columns([1.4, 0.8, 0.9, 0.9, 0.9, 0.9])
 
 with control_cols[0]:
-    data_mode = st.selectbox("Data", ["Reële data", "Dummy data"], index=0 if real_data_available else 1)
-with control_cols[1]:
     strategy_label = st.selectbox("Strategie", list(STRATEGY_OPTIONS.keys()), index=0)
-with control_cols[2]:
+with control_cols[1]:
     alpha = st.slider("Alpha", 0.0, 1.0, 0.60, 0.05)
-with control_cols[3]:
+with control_cols[2]:
     lookahead_days = st.slider("Zicht-horizon", 1, 42, 7, 1)
-with control_cols[4]:
+with control_cols[3]:
     booking_horizon_days = st.slider("Boek-horizon", 7, 84, 42, 7)
-with control_cols[5]:
+with control_cols[4]:
     avg_speed_kmh = st.slider("Snelheid", 10, 80, 30, 5)
-with control_cols[6]:
+with control_cols[5]:
     penalty_weight = st.slider("Penalty", 1.0, 25.0, float(OVERCAPACITY_PENALTY_WEIGHT), 1.0)
 with control_cols[7]:
     split_by = st.selectbox("Verdeling", ["Homecare", "Zorgtype"], index=0)
@@ -531,7 +493,6 @@ else:
     n_dummy_patients = st.slider("Aantal dummy patiënten", 20, 250, 80, 10)
     patient_df = build_dummy_patients(n_dummy_patients)
 
-# Voer de allocatie uit met de geselecteerde strategie uit de dropdown
 assignment_df, utilization_df, activity_df, kpis = run_dashboard_allocation(
     patient_df=patient_df,
     provider_df=provider_df,
@@ -542,6 +503,10 @@ assignment_df, utilization_df, activity_df, kpis = run_dashboard_allocation(
     strategy=STRATEGY_OPTIONS[strategy_label],
     overcapacity_penalty_weight=penalty_weight,
 )
+
+# X-as van de grafieken: start bij eerste discharge date en stop bij laatste discharge date uit patients.csv
+min_discharge_date = pd.to_datetime(patient_df["discharge_date"]).min()
+max_discharge_date = pd.to_datetime(patient_df["discharge_date"]).max()
 
 kpi_cols = st.columns(4)
 with kpi_cols[0]:
@@ -556,10 +521,10 @@ with kpi_cols[3]:
 mid_cols = st.columns(2)
 with mid_cols[0]:
     st.subheader("Patiëntverdeling")
-    st.plotly_chart(build_distribution_chart(activity_df, split_by), use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(build_distribution_chart(activity_df, min_discharge_date, max_discharge_date), use_container_width=True, config={"displayModeBar": False})
 with mid_cols[1]:
     st.subheader("Bezettingsgraad")
-    st.plotly_chart(build_occupancy_chart(utilization_df), use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(build_occupancy_chart(utilization_df, min_discharge_date, max_discharge_date), use_container_width=True, config={"displayModeBar": False})
 
 st.subheader("Toewijzingen per homecare")
 st.plotly_chart(build_assignment_chart(assignment_df, provider_df), use_container_width=True, config={"displayModeBar": False})
