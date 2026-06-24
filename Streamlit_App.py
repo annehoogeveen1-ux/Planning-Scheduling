@@ -409,3 +409,6 @@ if st.sidebar.button("🔴 Sluit Dashboard & Terminal"):
     st.sidebar.success("Dashboard wordt afgesloten...")
     import signal
     os.kill(os.getpid(), signal.SIGTERM)
+
+
+#C:/Users/krisl/AppData/Local/Python/pythoncore-3.14-64/python.exe -m streamlit run Streamlit_App.py
