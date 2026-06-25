@@ -469,7 +469,7 @@ def plot_kpi_summary(all_results: dict, providers: list):
     ax3.grid(axis='y', linestyle='--', alpha=0.6)
     
     fig.tight_layout(rect=[0, 0, 1, 0.96]) # Adjust to fit the suptitle
-    plt.savefig("kpi_summary_dashboard.png", dpi=150)
+    plt.savefig("kpi_summary.png", dpi=150)
     plt.close(fig)
 
 # =============================================================================
@@ -510,7 +510,7 @@ if __name__ == "__main__":
             plot_utilization(method, result, patients_copy)
             
         # Generate the master dashboard after all methods are finished
-        print("Generating KPI Summary(kpi_summary_dashboard.png)...")
+        print("Generating KPI Summary(kpi_summary.png)...")
         plot_kpi_summary(all_results, base_providers)
             
     except FileNotFoundError:
